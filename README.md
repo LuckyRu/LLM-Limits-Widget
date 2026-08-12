@@ -21,7 +21,9 @@
 - [Product brief](docs/product-brief.md)
 - [Первичное продуктовое исследование](docs/research/2026-08-12-initial-research.md)
 - [Техническая проверка MVP](docs/technical/feasibility-2026-08-12.md)
+- [Получение лимитов Codex из desktop и CLI](docs/technical/codex-usage-acquisition-2026-08-12.md)
 - [Выбор технологий](docs/decisions/0005-technology-selection.md)
+- [ADR: источник лимитов Codex](docs/decisions/0006-codex-usage-source.md)
 - [Decision log](docs/decisions/0001-project-scope.md)
 
 ## Рабочее название

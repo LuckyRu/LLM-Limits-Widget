@@ -59,6 +59,12 @@ Scope: личные планы ChatGPT Plus/Pro и Claude Pro; один личн
 
 Источник: [Using Codex with your ChatGPT plan](https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan), [OpenAI API authentication](https://platform.openai.com/docs/api-reference/backward-compatibility?lang=ruby).
 
+### Новое техническое направление: локальный Codex App Server
+
+В CLI 0.147.0 на Windows обнаружен JSON-RPC App Server. Через локальный процесс codex app-server --stdio доступны account/rateLimits/read и account/rateLimits/updated, включая usedPercent, resetsAt, длительность окон, plan type и credits. Handshake и распознавание запроса проверены локально; получить реальные данные в исследовательском запуске не удалось, потому что среда была без credentials.
+
+Это становится первым кандидатом для автоматического Codex provider. Канал version-coupled и требует интеграционного теста в реальной авторизованной пользовательской сессии. Полная матрица и контракт описаны в [исследовании получения лимитов Codex](codex-usage-acquisition-2026-08-12.md).
+
 ## Claude Pro
 
 ### Что подтверждено
