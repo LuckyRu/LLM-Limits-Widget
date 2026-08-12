@@ -1,0 +1,26 @@
+# Windows / IDE
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Build output
+bin/
+obj/
+dist/
+build/
+
+# Node / local tooling
+node_modules/
+.npm/
+
+# Local secrets and environment files
+.env
+.env.*
+!.env.example
+
+# Logs and temporary files
+*.log
+tmp/
+temp/
