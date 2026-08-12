@@ -21,6 +21,8 @@
 
 Для Codex первым автоматическим каналом исследуем локальный codex app-server --stdio с JSON-RPC методом account/rateLimits/read. Подробности и ограничения: [исследование получения лимитов Codex](technical/codex-usage-acquisition-2026-08-12.md) и [ADR 0006](decisions/0006-codex-usage-source.md).
 
+Для Claude принято гибридное получение лимитов: statusLine bridge для быстрых обновлений и прямой вызов CLI /usage при stale-состоянии, на старте и по ручному обновлению. Подробности: [исследование получения лимитов Claude](technical/claude-usage-acquisition-2026-08-12.md), [ADR 0007](decisions/0007-claude-usage-source.md) и [ADR 0008](decisions/0008-claude-hybrid-usage-transport.md).
+
 ## Ближайшие документы
 
 1. Интервью с пользователями, регулярно работающими с ChatGPT и Claude.
