@@ -1,0 +1,19 @@
+<UserControl x:Class="LLMLimitsWidget.FloatingOverlay.LimitMetricControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:LLMLimitsWidget.FloatingOverlay"
+             Width="75"
+             Height="43"
+             Background="Transparent">
+    <Grid>
+        <local:CircularMeter x:Name="Meter"
+                             Width="43"
+                             Height="43"
+                             HorizontalAlignment="Left"
+                             VerticalAlignment="Center" />
+        <TextBlock x:Name="PeriodLabel"
+                   Margin="47,0,0,0"
+                   VerticalAlignment="Center"
+                   Style="{StaticResource TinyLabel}" />
+    </Grid>
+</UserControl>

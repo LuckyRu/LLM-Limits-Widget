@@ -1,0 +1,104 @@
+<Window x:Class="LLMLimitsWidget.FloatingOverlay.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:LLMLimitsWidget.FloatingOverlay"
+        Title="LLM Limits Widget"
+        Width="285"
+        Height="112"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ResizeMode="NoResize"
+        ShowInTaskbar="True"
+        Topmost="True"
+        SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Display"
+        Loaded="Window_Loaded"
+        PreviewKeyDown="Window_PreviewKeyDown"
+        PreviewMouseLeftButtonDown="Window_PreviewMouseLeftButtonDown"
+        PreviewMouseLeftButtonUp="Window_PreviewMouseLeftButtonUp"
+        PreviewMouseMove="Window_PreviewMouseMove">
+    <Window.Resources>
+        <ContextMenu x:Key="WidgetContextMenu">
+            <MenuItem Header="Масштаб 80%" Tag="0.8" Click="ScaleMenuItem_Click" />
+            <MenuItem Header="Масштаб 100%" Tag="1.0" Click="ScaleMenuItem_Click" />
+            <MenuItem Header="Масштаб 120%" Tag="1.2" Click="ScaleMenuItem_Click" />
+            <MenuItem Header="Масштаб 150%" Tag="1.5" Click="ScaleMenuItem_Click" />
+            <MenuItem Header="Масштаб 180%" Tag="1.8" Click="ScaleMenuItem_Click" />
+            <Separator />
+            <MenuItem Header="Обновить" Click="RefreshMenuItem_Click" />
+            <MenuItem Header="Сбросить позицию" Click="ResetPositionMenuItem_Click" />
+            <MenuItem Header="Скрыть виджет" Click="HideMenuItem_Click" />
+            <Separator />
+            <MenuItem Header="Выйти" Click="ExitMenuItem_Click" />
+        </ContextMenu>
+    </Window.Resources>
+    <Viewbox Stretch="Uniform" StretchDirection="Both">
+        <Border x:Name="Surface"
+                Width="285"
+                Height="112"
+                Margin="1"
+                Padding="9,7"
+                CornerRadius="18"
+                Background="{StaticResource SurfaceBrush}"
+                BorderBrush="{StaticResource SurfaceBorderBrush}"
+                BorderThickness="1"
+                ContextMenu="{StaticResource WidgetContextMenu}"
+                MouseLeftButtonDown="Surface_MouseLeftButtonDown">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="47" />
+                <RowDefinition Height="1" />
+                <RowDefinition Height="47" />
+            </Grid.RowDefinitions>
+
+            <Grid Grid.Row="0" Margin="3,0,1,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="28" />
+                    <ColumnDefinition Width="1*" />
+                    <ColumnDefinition Width="84" />
+                </Grid.ColumnDefinitions>
+
+                <Border Grid.Column="0" Width="24" Height="24" CornerRadius="7" Background="{StaticResource CodexBrush}" VerticalAlignment="Center">
+                    <local:ProviderLogo Provider="OpenAi" Width="17" Height="17" Foreground="#102126" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <local:LimitMetricControl Grid.Column="1" Period="W" Value="62" PercentText="62.00%" Accent="{StaticResource CodexBrush}" HorizontalAlignment="Left" ToolTip="Weekly window · 62.00% remaining" />
+
+                <StackPanel Grid.Column="3" VerticalAlignment="Center">
+                    <TextBlock Text="◷ 07:03" FontSize="11" FontWeight="SemiBold" />
+                    <TextBlock Text="18 Aug · reset" Style="{StaticResource TinyLabel}" Margin="0,2,0,0" />
+                </StackPanel>
+
+            </Grid>
+
+            <Border Grid.Row="1" Background="{StaticResource DividerBrush}" />
+
+            <Grid Grid.Row="2" Margin="3,0,1,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="28" />
+                    <ColumnDefinition Width="1*" />
+                    <ColumnDefinition Width="84" />
+                </Grid.ColumnDefinitions>
+
+                <Border Grid.Column="0" Width="24" Height="24" CornerRadius="7" Background="{StaticResource ClaudeBrush}" VerticalAlignment="Center">
+                    <local:ProviderLogo Provider="Claude" Width="17" Height="17" Foreground="#2B1710" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <Grid Grid.Column="1" VerticalAlignment="Center">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="75" />
+                        <ColumnDefinition Width="75" />
+                    </Grid.ColumnDefinitions>
+                    <local:LimitMetricControl Grid.Column="0" Period="5h" Value="5" PercentText="5.00%" Accent="{StaticResource ClaudeBrush}" HorizontalAlignment="Left" />
+                    <local:LimitMetricControl Grid.Column="1" Period="7d" Value="70" PercentText="70.00%" Accent="{StaticResource ClaudeBrush}" HorizontalAlignment="Left" />
+                </Grid>
+
+                <StackPanel Grid.Column="3" VerticalAlignment="Center">
+                    <TextBlock Text="◷ 00:30" FontSize="11" FontWeight="SemiBold" />
+                    <TextBlock Text="13 Aug · reset" Style="{StaticResource TinyLabel}" Margin="0,2,0,0" />
+                </StackPanel>
+
+            </Grid>
+        </Grid>
+        </Border>
+    </Viewbox>
+</Window>
