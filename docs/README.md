@@ -9,6 +9,10 @@
 - `technical/` — feasibility-проверки, технические риски и результаты spike.
 - `decisions/` — короткие записи решений и их причин.
 
+Актуальная реализационная документация:
+
+- [FloatingOverlay implementation](technical/floating-overlay-implementation-2026-08-13.md) — архитектура WPF overlay, native placement controller, защита границ монитора, taskbar overlap, persistence, DPI и тестирование.
+
 ## Правила ведения
 
 - Дату документа указываем в формате `YYYY-MM-DD`.
