@@ -34,8 +34,11 @@
         </Grid>
 
         <StackPanel Grid.Column="2" VerticalAlignment="Center">
-            <TextBlock x:Name="CountdownText" FontSize="11" FontWeight="SemiBold" />
-            <TextBlock x:Name="ResetText" Style="{StaticResource TinyLabel}" Margin="0,2,0,0" />
+            <TextBlock x:Name="CountdownText" FontSize="14" FontWeight="SemiBold" />
+            <TextBlock x:Name="ResetText"
+                       Style="{StaticResource TinyLabel}"
+                       FontSize="11"
+                       Margin="0,2,0,0" />
         </StackPanel>
     </Grid>
 </UserControl>

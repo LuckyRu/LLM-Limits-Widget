@@ -6,14 +6,21 @@
              Height="43"
              Background="Transparent">
     <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="43" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="4" />
+        </Grid.ColumnDefinitions>
         <local:CircularMeter x:Name="Meter"
+                             Grid.Column="0"
                              Width="43"
                              Height="43"
                              HorizontalAlignment="Left"
                              VerticalAlignment="Center" />
         <TextBlock x:Name="PeriodLabel"
-                   Margin="47,0,0,0"
+                   Grid.Column="1"
                    VerticalAlignment="Center"
-                   Style="{StaticResource TinyLabel}" />
+                   Style="{StaticResource TinyLabel}"
+                   FontSize="12" />
     </Grid>
 </UserControl>

@@ -89,7 +89,7 @@ public sealed class CircularMeter : FrameworkElement
             CultureInfo.CurrentCulture,
             System.Windows.FlowDirection.LeftToRight,
             new Typeface(new System.Windows.Media.FontFamily("Segoe UI"), FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal),
-            Label.Length > 5 ? 8 : 10,
+            Label.Length > 5 ? 10 : 12,
             new SolidColorBrush(System.Windows.Media.Color.FromRgb(241, 245, 247)),
             dpi);
         drawingContext.DrawText(text, new WpfPoint(center.X - (text.Width / 2), center.Y - (text.Height / 2) + 1));
