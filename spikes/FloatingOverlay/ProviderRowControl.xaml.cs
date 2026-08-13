@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -93,12 +94,12 @@ public partial class ProviderRowControl : System.Windows.Controls.UserControl
             : new SolidColorBrush(System.Windows.Media.Color.FromRgb(16, 33, 38));
 
         MetricOne.Value = MetricOneValue;
-        MetricOne.PercentText = MetricOnePercent;
+        MetricOne.PercentText = FormatPercent(MetricOnePercent);
         MetricOne.Period = MetricOnePeriod;
         MetricOne.Accent = Accent;
 
         MetricTwo.Value = MetricTwoValue;
-        MetricTwo.PercentText = MetricTwoPercent;
+        MetricTwo.PercentText = FormatPercent(MetricTwoPercent);
         MetricTwo.Period = MetricTwoPeriod;
         MetricTwo.Accent = Accent;
         var metricWidth = Compact ? 62 : 75;
@@ -111,5 +112,21 @@ public partial class ProviderRowControl : System.Windows.Controls.UserControl
 
         CountdownText.Text = Countdown;
         ResetText.Text = ResetLabel;
+    }
+
+    private static string FormatPercent(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text) || !text.TrimEnd().EndsWith('%'))
+        {
+            return text;
+        }
+
+        var numberText = text.Trim().TrimEnd('%').Trim();
+        if (!decimal.TryParse(numberText, NumberStyles.Number, CultureInfo.CurrentCulture, out var value))
+        {
+            return text;
+        }
+
+        return $"{value.ToString("0.##", CultureInfo.CurrentCulture)}%";
     }
 }
