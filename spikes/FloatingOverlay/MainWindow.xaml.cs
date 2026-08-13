@@ -142,6 +142,7 @@ public partial class MainWindow : Window
     private void Window_Deactivated(object? sender, EventArgs e)
     {
         FinishResize();
+        _placementController.ReassertTopmost();
     }
 
     private bool FinishResize()

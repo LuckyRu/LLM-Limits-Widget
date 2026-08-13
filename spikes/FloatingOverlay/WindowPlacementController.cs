@@ -148,12 +148,14 @@ internal sealed class WindowPlacementController : IDisposable
     private const int WmEnterSizeMove = 0x0231;
     private const int WmExitSizeMove = 0x0232;
     private const int WmWindowPosChanging = 0x0046;
+    private const int WmActivateApp = 0x001C;
     private const int WmDisplayChange = 0x007E;
     private const int WmSettingChange = 0x001A;
     private const int WmDpiChanged = 0x02E0;
     private const int WmPowerBroadcast = 0x0218;
     private const int PbtApmResumeAutomatic = 0x0012;
     private const uint MonitorDefaultToNearest = 2;
+    private static readonly IntPtr HwndTopmost = new(-1);
     private const uint SwpNoActivate = 0x0010;
     private const uint SwpNoZOrder = 0x0004;
     private const uint SwpNoSize = 0x0001;
@@ -169,6 +171,8 @@ internal sealed class WindowPlacementController : IDisposable
     private IntPtr _lastDragMonitor;
     private WindowPlacementSettings? _pendingRestore;
     private readonly System.Windows.Threading.DispatcherTimer _topologyTimer;
+    private readonly System.Windows.Threading.DispatcherTimer _topmostTimer;
+    private int _topmostPassesRemaining;
 
     public WindowPlacementController(System.Windows.Window window)
     {
@@ -179,9 +183,32 @@ internal sealed class WindowPlacementController : IDisposable
             TopologyTimer_Tick,
             window.Dispatcher);
         _topologyTimer.Stop();
+        _topmostTimer = new System.Windows.Threading.DispatcherTimer(
+            TimeSpan.FromMilliseconds(75),
+            System.Windows.Threading.DispatcherPriority.Input,
+            TopmostTimer_Tick,
+            window.Dispatcher);
+        _topmostTimer.Stop();
     }
 
     public event EventHandler? PlacementCommitted;
+
+    public void ReassertTopmost()
+    {
+        EnsureTopmost();
+        _topmostPassesRemaining = 4;
+        _topmostTimer.Stop();
+        _topmostTimer.Start();
+    }
+
+    private void TopmostTimer_Tick(object? sender, EventArgs e)
+    {
+        EnsureTopmost();
+        if (--_topmostPassesRemaining <= 0)
+        {
+            _topmostTimer.Stop();
+        }
+    }
 
     public void Attach()
     {
@@ -428,6 +455,7 @@ internal sealed class WindowPlacementController : IDisposable
 
         _disposed = true;
         _topologyTimer.Stop();
+        _topmostTimer.Stop();
         _source?.RemoveHook(WindowProc);
         _source = null;
     }
@@ -466,6 +494,10 @@ internal sealed class WindowPlacementController : IDisposable
         else if (message == WmWindowPosChanging && lParam != IntPtr.Zero && !_applyingPlacement)
         {
             ConstrainWindowPosition(lParam);
+        }
+        else if (message == WmActivateApp && wParam == IntPtr.Zero)
+        {
+            ReassertTopmost();
         }
         else if (message is WmDisplayChange or WmSettingChange or WmDpiChanged
                  || (message == WmPowerBroadcast && wParam.ToInt32() == PbtApmResumeAutomatic))
@@ -729,6 +761,29 @@ internal sealed class WindowPlacementController : IDisposable
         {
             _applyingPlacement = false;
         }
+    }
+
+    private void EnsureTopmost()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        EnsureAttached();
+        if (_handle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        SetWindowPos(
+            _handle,
+            HwndTopmost,
+            0,
+            0,
+            0,
+            0,
+            SwpNoMove | SwpNoSize | SwpNoActivate);
     }
 
     [StructLayout(LayoutKind.Sequential)]

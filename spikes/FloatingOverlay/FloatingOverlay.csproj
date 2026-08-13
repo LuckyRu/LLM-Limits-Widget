@@ -11,4 +11,7 @@
     <AssemblyName>LLMLimitsWidget.FloatingOverlay</AssemblyName>
     <RootNamespace>LLMLimitsWidget.FloatingOverlay</RootNamespace>
   </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\llm-limits-tray.ico" />
+  </ItemGroup>
 </Project>

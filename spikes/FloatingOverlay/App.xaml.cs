@@ -1,8 +1,9 @@
+using System.Drawing;
+using System.IO;
 using System.Windows;
 using FormsContextMenuStrip = System.Windows.Forms.ContextMenuStrip;
 using FormsNotifyIcon = System.Windows.Forms.NotifyIcon;
 using FormsToolStripMenuItem = System.Windows.Forms.ToolStripMenuItem;
-using DrawingSystemIcons = System.Drawing.SystemIcons;
 
 namespace LLMLimitsWidget.FloatingOverlay;
 
@@ -10,6 +11,8 @@ public partial class App : System.Windows.Application
 {
     private FormsNotifyIcon? _trayIcon;
     private FormsContextMenuStrip? _trayMenu;
+    private Icon? _trayIconAsset;
+    private Stream? _trayIconStream;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -22,9 +25,10 @@ public partial class App : System.Windows.Application
         _trayMenu.Items.Add(new FormsToolStripMenuItem("Показать виджет", null, (_, _) => ShowWidget()));
         _trayMenu.Items.Add(new FormsToolStripMenuItem("Сбросить позицию", null, (_, _) => ResetWidgetPosition()));
         _trayMenu.Items.Add(new FormsToolStripMenuItem("Выйти", null, (_, _) => Shutdown()));
+        _trayIconAsset = LoadTrayIcon();
         _trayIcon = new FormsNotifyIcon
         {
-            Icon = DrawingSystemIcons.Application,
+            Icon = _trayIconAsset ?? SystemIcons.Application,
             Text = "LLM Limits Widget",
             Visible = true,
             ContextMenuStrip = _trayMenu
@@ -40,8 +44,17 @@ public partial class App : System.Windows.Application
             _trayIcon.Dispose();
         }
 
+        _trayIconAsset?.Dispose();
+        _trayIconStream?.Dispose();
         _trayMenu?.Dispose();
         base.OnExit(e);
+    }
+
+    private Icon? LoadTrayIcon()
+    {
+        _trayIconStream = typeof(App).Assembly.GetManifestResourceStream(
+            "LLMLimitsWidget.FloatingOverlay.Assets.llm-limits-tray.ico");
+        return _trayIconStream is null ? null : new Icon(_trayIconStream);
     }
 
     private void ShowWidget()
