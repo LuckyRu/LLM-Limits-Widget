@@ -20,6 +20,7 @@ public partial class App : System.Windows.Application
 
         _trayMenu = new FormsContextMenuStrip();
         _trayMenu.Items.Add(new FormsToolStripMenuItem("Показать виджет", null, (_, _) => ShowWidget()));
+        _trayMenu.Items.Add(new FormsToolStripMenuItem("Сбросить позицию", null, (_, _) => ResetWidgetPosition()));
         _trayMenu.Items.Add(new FormsToolStripMenuItem("Выйти", null, (_, _) => Shutdown()));
         _trayIcon = new FormsNotifyIcon
         {
@@ -52,6 +53,23 @@ public partial class App : System.Windows.Application
 
         MainWindow.Show();
         MainWindow.WindowState = WindowState.Normal;
+        if (MainWindow is MainWindow widget)
+        {
+            widget.EnsureVisible();
+        }
         MainWindow.Activate();
+    }
+
+    private void ResetWidgetPosition()
+    {
+        if (MainWindow is not MainWindow widget)
+        {
+            return;
+        }
+
+        widget.Show();
+        widget.WindowState = WindowState.Normal;
+        widget.ResetWidgetPosition();
+        widget.Activate();
     }
 }

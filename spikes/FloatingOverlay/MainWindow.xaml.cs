@@ -7,6 +7,8 @@ namespace LLMLimitsWidget.FloatingOverlay;
 public partial class MainWindow : Window
 {
     private readonly WidgetAppearance _appearance = new();
+    private readonly WidgetSettings _settings;
+    private readonly WindowPlacementController _placementController;
     private const double MinimumScale = 0.6;
     private const double MaximumScale = 2.0;
     private const double ResizeHandleSize = 24;
@@ -15,26 +17,60 @@ public partial class MainWindow : Window
     private ResizeCorner _resizeCorner;
     private System.Windows.Point _resizeStartScreen;
     private double _resizeStartScale;
-    private double _resizeStartLeft;
-    private double _resizeStartTop;
+    private PixelRect _resizeStartRect;
+    private uint _resizeStartDpi = 96;
+    private bool _isLoaded;
 
     public MainWindow()
     {
+        _settings = WidgetSettingsStore.Load();
+        _appearance.Orientation = _settings.Orientation;
+        _appearance.Scale = _settings.Scale;
+        _scale = _settings.Scale;
+        _appearance.SurfaceOpacity = _settings.SurfaceOpacity;
+        _appearance.CornerRadius = _settings.CornerRadius;
         InitializeComponent();
+        _placementController = new WindowPlacementController(this);
+        _placementController.PlacementCommitted += PlacementController_PlacementCommitted;
     }
 
     private void Window_Loaded(object sender, RoutedEventArgs e)
     {
+        SetOrientation(_appearance.Orientation, persist: false);
         ApplySurfaceBackgroundOpacity();
         Surface.CornerRadius = new CornerRadius(_appearance.CornerRadius);
-        ResetPosition();
+
+        _isLoaded = true;
+        UpdateLayout();
+        if (_settings.Placement?.IsValid == true)
+        {
+            _placementController.Restore(_settings.Placement);
+        }
+        else
+        {
+            _placementController.PlaceAtDefault();
+        }
+        PersistSettings();
+    }
+
+    private void Window_SourceInitialized(object? sender, EventArgs e)
+    {
+        _placementController.Attach();
     }
 
     private void Surface_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (e.ClickCount == 1)
         {
-            DragMove();
+            try
+            {
+                DragMove();
+            }
+            finally
+            {
+                _placementController.NormalizeCurrentWindow(snapToEdges: true);
+                PersistSettings();
+            }
         }
     }
 
@@ -50,22 +86,19 @@ public partial class MainWindow : Window
         _resizeCorner = corner;
         _resizeStartScreen = PointToScreen(e.GetPosition(this));
         _resizeStartScale = _scale;
-        _resizeStartLeft = Left;
-        _resizeStartTop = Top;
+        _resizeStartRect = _placementController.GetCurrentWindowRect()
+            ?? new PixelRect(0, 0, Math.Max(1, (int)ActualWidth), Math.Max(1, (int)ActualHeight));
+        _resizeStartDpi = _placementController.GetCurrentDpi();
         CaptureMouse();
         e.Handled = true;
     }
 
     private void Window_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        if (!_isResizing)
+        if (FinishResize())
         {
-            return;
+            e.Handled = true;
         }
-
-        _isResizing = false;
-        ReleaseMouseCapture();
-        e.Handled = true;
     }
 
     private void Window_PreviewMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
@@ -94,10 +127,40 @@ public partial class MainWindow : Window
             _ => 0
         };
 
-        var nextScale = Math.Clamp(_resizeStartScale + (signedDelta / _appearance.BaseWidth), MinimumScale, MaximumScale);
+        var baseWidthPixels = _appearance.BaseWidth * _resizeStartDpi / 96d;
+        var nextScale = Math.Clamp(_resizeStartScale + (signedDelta / baseWidthPixels), MinimumScale, MaximumScale);
         ApplyScale(nextScale, keepCenter: false);
         AnchorAfterResize();
         e.Handled = true;
+    }
+
+    private void Window_LostMouseCapture(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        FinishResize();
+    }
+
+    private void Window_Deactivated(object? sender, EventArgs e)
+    {
+        FinishResize();
+    }
+
+    private bool FinishResize()
+    {
+        if (!_isResizing)
+        {
+            return false;
+        }
+
+        _isResizing = false;
+        if (IsMouseCaptured)
+        {
+            ReleaseMouseCapture();
+        }
+
+        UpdateLayout();
+        _placementController.NormalizeCurrentWindow(snapToEdges: true);
+        PersistSettings();
+        return true;
     }
 
     private void RefreshButton_Click(object sender, RoutedEventArgs e)
@@ -114,6 +177,9 @@ public partial class MainWindow : Window
         }
 
         ApplyScale(scale, keepCenter: true);
+        UpdateLayout();
+        _placementController.NormalizeCurrentWindow(snapToEdges: true);
+        PersistSettings();
     }
 
     private void RefreshMenuItem_Click(object sender, RoutedEventArgs e)
@@ -123,7 +189,10 @@ public partial class MainWindow : Window
 
     private void SurfaceOpacitySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        _appearance.SurfaceOpacity = e.NewValue;
+        if (_isLoaded)
+        {
+            _appearance.SurfaceOpacity = e.NewValue;
+        }
 
         if (sender is System.Windows.Controls.Slider slider)
         {
@@ -133,6 +202,17 @@ public partial class MainWindow : Window
         if (Surface is not null)
         {
             ApplySurfaceBackgroundOpacity();
+        }
+
+        PersistSettings();
+    }
+
+    private void WidgetContextMenu_Opened(object sender, RoutedEventArgs e)
+    {
+        if (FindVisualChild<System.Windows.Controls.Slider>(sender as DependencyObject) is { } slider)
+        {
+            slider.Value = _appearance.SurfaceOpacity;
+            slider.ToolTip = $"Прозрачность фона: {_appearance.SurfaceOpacity:P0}";
         }
     }
 
@@ -171,6 +251,7 @@ public partial class MainWindow : Window
     private void ResetPositionMenuItem_Click(object sender, RoutedEventArgs e)
     {
         ResetPosition();
+        PersistSettings();
     }
 
     private void HideMenuItem_Click(object sender, RoutedEventArgs e)
@@ -185,8 +266,20 @@ public partial class MainWindow : Window
 
     private void ResetPosition()
     {
-        Left = SystemParameters.PrimaryScreenWidth - Width - 22;
-        Top = SystemParameters.PrimaryScreenHeight - Height - 4;
+        _placementController.PlaceAtDefault();
+    }
+
+    public void EnsureVisible()
+    {
+        UpdateLayout();
+        _placementController.NormalizeCurrentWindow(snapToEdges: false);
+        PersistSettings();
+    }
+
+    public void ResetWidgetPosition()
+    {
+        ResetPosition();
+        PersistSettings();
     }
 
     private void RefreshSample()
@@ -197,7 +290,12 @@ public partial class MainWindow : Window
 
     private void SetOrientation(LayoutOrientation orientation)
     {
-        var center = new System.Windows.Point(Left + (Width / 2), Top + (Height / 2));
+        SetOrientation(orientation, persist: true);
+    }
+
+    private void SetOrientation(LayoutOrientation orientation, bool persist)
+    {
+        var previousPlacement = _isLoaded ? _placementController.Capture() : null;
         _appearance.Orientation = orientation;
         VerticalLayout.Visibility = orientation == LayoutOrientation.Vertical ? Visibility.Visible : Visibility.Collapsed;
         HorizontalLayout.Visibility = orientation == LayoutOrientation.Horizontal ? Visibility.Visible : Visibility.Collapsed;
@@ -210,37 +308,39 @@ public partial class MainWindow : Window
         Surface.Height = _appearance.BaseHeight;
         Width = _appearance.BaseWidth * _appearance.Scale;
         Height = _appearance.BaseHeight * _appearance.Scale;
-        Left = center.X - (Width / 2);
-        Top = center.Y - (Height / 2);
+        if (_isLoaded)
+        {
+            UpdateLayout();
+            _placementController.Restore(previousPlacement);
+        }
+        if (persist)
+        {
+            PersistSettings();
+        }
     }
 
     private void ApplyScale(double scale, bool keepCenter)
     {
-        var center = new System.Windows.Point(Left + (Width / 2), Top + (Height / 2));
+        var previousPlacement = keepCenter && _isLoaded ? _placementController.Capture() : null;
         _scale = Math.Clamp(scale, MinimumScale, MaximumScale);
         _appearance.Scale = _scale;
         Width = _appearance.BaseWidth * _scale;
         Height = _appearance.BaseHeight * _scale;
 
-        if (keepCenter)
+        if (keepCenter && _isLoaded)
         {
-            Left = center.X - (Width / 2);
-            Top = center.Y - (Height / 2);
+            UpdateLayout();
+            _placementController.Restore(previousPlacement);
         }
     }
 
     private void AnchorAfterResize()
     {
-        Left = _resizeCorner switch
-        {
-            ResizeCorner.TopLeft or ResizeCorner.BottomLeft => _resizeStartLeft + (_appearance.BaseWidth * _resizeStartScale) - Width,
-            _ => _resizeStartLeft
-        };
-        Top = _resizeCorner switch
-        {
-            ResizeCorner.TopLeft or ResizeCorner.TopRight => _resizeStartTop + (_appearance.BaseHeight * _resizeStartScale) - Height,
-            _ => _resizeStartTop
-        };
+        UpdateLayout();
+        _placementController.AnchorResize(
+            _resizeStartRect,
+            anchorRight: _resizeCorner is ResizeCorner.TopLeft or ResizeCorner.BottomLeft,
+            anchorBottom: _resizeCorner is ResizeCorner.TopLeft or ResizeCorner.TopRight);
     }
 
     private ResizeCorner GetResizeCorner(System.Windows.Point position)
@@ -267,6 +367,64 @@ public partial class MainWindow : Window
         {
             Hide();
         }
+    }
+
+    private void Window_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        PersistSettings();
+    }
+
+    private void Window_Closed(object? sender, EventArgs e)
+    {
+        PersistSettings();
+        _placementController.PlacementCommitted -= PlacementController_PlacementCommitted;
+        _placementController.Dispose();
+    }
+
+    private void PlacementController_PlacementCommitted(object? sender, EventArgs e)
+    {
+        PersistSettings();
+    }
+
+    private void PersistSettings()
+    {
+        if (!_isLoaded)
+        {
+            return;
+        }
+
+        _settings.Orientation = _appearance.Orientation;
+        _settings.Scale = _appearance.Scale;
+        _settings.SurfaceOpacity = _appearance.SurfaceOpacity;
+        _settings.CornerRadius = _appearance.CornerRadius;
+        _settings.Placement = _placementController.Capture();
+        WidgetSettingsStore.Save(_settings);
+    }
+
+    private static T? FindVisualChild<T>(DependencyObject? parent)
+        where T : DependencyObject
+    {
+        if (parent is null)
+        {
+            return null;
+        }
+
+        for (var index = 0; index < System.Windows.Media.VisualTreeHelper.GetChildrenCount(parent); index++)
+        {
+            var child = System.Windows.Media.VisualTreeHelper.GetChild(parent, index);
+            if (child is T match)
+            {
+                return match;
+            }
+
+            var descendant = FindVisualChild<T>(child);
+            if (descendant is not null)
+            {
+                return descendant;
+            }
+        }
+
+        return null;
     }
 
     private enum ResizeCorner

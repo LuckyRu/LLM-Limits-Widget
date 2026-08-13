@@ -9,17 +9,22 @@
         AllowsTransparency="True"
         Background="Transparent"
         ResizeMode="NoResize"
-        ShowInTaskbar="True"
+        ShowInTaskbar="False"
         Topmost="True"
         SnapsToDevicePixels="True"
         TextOptions.TextFormattingMode="Display"
         Loaded="Window_Loaded"
+        Closing="Window_Closing"
+        Closed="Window_Closed"
+        SourceInitialized="Window_SourceInitialized"
+        Deactivated="Window_Deactivated"
+        LostMouseCapture="Window_LostMouseCapture"
         PreviewKeyDown="Window_PreviewKeyDown"
         PreviewMouseLeftButtonDown="Window_PreviewMouseLeftButtonDown"
         PreviewMouseLeftButtonUp="Window_PreviewMouseLeftButtonUp"
         PreviewMouseMove="Window_PreviewMouseMove">
     <Window.Resources>
-        <ContextMenu x:Key="WidgetContextMenu">
+        <ContextMenu x:Key="WidgetContextMenu" Opened="WidgetContextMenu_Opened">
             <MenuItem Header="Вертикальная раскладка" Click="VerticalLayoutMenuItem_Click" />
             <MenuItem Header="Горизонтальная раскладка" Click="HorizontalLayoutMenuItem_Click" />
             <Separator />
