@@ -20,12 +20,29 @@
         PreviewMouseMove="Window_PreviewMouseMove">
     <Window.Resources>
         <ContextMenu x:Key="WidgetContextMenu">
+            <MenuItem Header="Вертикальная раскладка" Click="VerticalLayoutMenuItem_Click" />
+            <MenuItem Header="Горизонтальная раскладка" Click="HorizontalLayoutMenuItem_Click" />
+            <Separator />
             <MenuItem Header="Масштаб 80%" Tag="0.8" Click="ScaleMenuItem_Click" />
             <MenuItem Header="Масштаб 100%" Tag="1.0" Click="ScaleMenuItem_Click" />
             <MenuItem Header="Масштаб 120%" Tag="1.2" Click="ScaleMenuItem_Click" />
             <MenuItem Header="Масштаб 150%" Tag="1.5" Click="ScaleMenuItem_Click" />
             <MenuItem Header="Масштаб 180%" Tag="1.8" Click="ScaleMenuItem_Click" />
             <Separator />
+            <MenuItem StaysOpenOnClick="True">
+                <MenuItem.Header>
+                    <StackPanel Width="214" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Width="92" Text="Прозрачность" VerticalAlignment="Center" />
+                        <Slider Width="84"
+                                Minimum="0.2"
+                                Maximum="1"
+                                Value="1"
+                                TickFrequency="0.1"
+                                VerticalAlignment="Center"
+                                ValueChanged="SurfaceOpacitySlider_ValueChanged" />
+                    </StackPanel>
+                </MenuItem.Header>
+            </MenuItem>
             <MenuItem Header="Обновить" Click="RefreshMenuItem_Click" />
             <MenuItem Header="Сбросить позицию" Click="ResetPositionMenuItem_Click" />
             <MenuItem Header="Скрыть виджет" Click="HideMenuItem_Click" />
@@ -45,60 +62,72 @@
                 BorderThickness="1"
                 ContextMenu="{StaticResource WidgetContextMenu}"
                 MouseLeftButtonDown="Surface_MouseLeftButtonDown">
-        <Grid>
-            <Grid.RowDefinitions>
-                <RowDefinition Height="47" />
-                <RowDefinition Height="1" />
-                <RowDefinition Height="47" />
-            </Grid.RowDefinitions>
-
-            <Grid Grid.Row="0" Margin="3,0,1,0">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="28" />
-                    <ColumnDefinition Width="1*" />
-                    <ColumnDefinition Width="84" />
-                </Grid.ColumnDefinitions>
-
-                <Border Grid.Column="0" Width="24" Height="24" CornerRadius="7" Background="{StaticResource CodexBrush}" VerticalAlignment="Center">
-                    <local:ProviderLogo Provider="OpenAi" Width="17" Height="17" Foreground="#102126" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                </Border>
-                <local:LimitMetricControl Grid.Column="1" Period="W" Value="62" PercentText="62.00%" Accent="{StaticResource CodexBrush}" HorizontalAlignment="Left" ToolTip="Weekly window · 62.00% remaining" />
-
-                <StackPanel Grid.Column="3" VerticalAlignment="Center">
-                    <TextBlock Text="◷ 07:03" FontSize="11" FontWeight="SemiBold" />
-                    <TextBlock Text="18 Aug · reset" Style="{StaticResource TinyLabel}" Margin="0,2,0,0" />
-                </StackPanel>
-
-            </Grid>
-
-            <Border Grid.Row="1" Background="{StaticResource DividerBrush}" />
-
-            <Grid Grid.Row="2" Margin="3,0,1,0">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="28" />
-                    <ColumnDefinition Width="1*" />
-                    <ColumnDefinition Width="84" />
-                </Grid.ColumnDefinitions>
-
-                <Border Grid.Column="0" Width="24" Height="24" CornerRadius="7" Background="{StaticResource ClaudeBrush}" VerticalAlignment="Center">
-                    <local:ProviderLogo Provider="Claude" Width="17" Height="17" Foreground="#2B1710" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                </Border>
-                <Grid Grid.Column="1" VerticalAlignment="Center">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="75" />
-                        <ColumnDefinition Width="75" />
-                    </Grid.ColumnDefinitions>
-                    <local:LimitMetricControl Grid.Column="0" Period="5h" Value="5" PercentText="5.00%" Accent="{StaticResource ClaudeBrush}" HorizontalAlignment="Left" />
-                    <local:LimitMetricControl Grid.Column="1" Period="7d" Value="70" PercentText="70.00%" Accent="{StaticResource ClaudeBrush}" HorizontalAlignment="Left" />
+            <Grid>
+                <Grid x:Name="VerticalLayout">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="47" />
+                        <RowDefinition Height="1" />
+                        <RowDefinition Height="47" />
+                    </Grid.RowDefinitions>
+                    <local:ProviderRowControl Grid.Row="0"
+                                              Provider="OpenAi"
+                                              Accent="{StaticResource CodexBrush}"
+                                              MetricOneValue="62"
+                                              MetricOnePercent="62.00%"
+                                              MetricOnePeriod="W"
+                                              Countdown="◷ 07:03"
+                                              ResetLabel="18 Aug · reset" />
+                    <Border Grid.Row="1" Background="{StaticResource DividerBrush}" />
+                    <local:ProviderRowControl Grid.Row="2"
+                                              Provider="Claude"
+                                              Accent="{StaticResource ClaudeBrush}"
+                                              MetricOneValue="5"
+                                              MetricOnePercent="5.00%"
+                                              MetricOnePeriod="5h"
+                                              MetricTwoValue="70"
+                                              MetricTwoPercent="70.00%"
+                                              MetricTwoPeriod="7d"
+                                              HasSecondMetric="True"
+                                              Countdown="◷ 00:30"
+                                              ResetLabel="13 Aug · reset" />
                 </Grid>
 
-                <StackPanel Grid.Column="3" VerticalAlignment="Center">
-                    <TextBlock Text="◷ 00:30" FontSize="11" FontWeight="SemiBold" />
-                    <TextBlock Text="13 Aug · reset" Style="{StaticResource TinyLabel}" Margin="0,2,0,0" />
-                </StackPanel>
-
+                <Grid x:Name="HorizontalLayout" Visibility="Collapsed">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <local:ProviderRowControl Grid.Column="0"
+                                              Compact="True"
+                                              Provider="OpenAi"
+                                              Accent="{StaticResource CodexBrush}"
+                                              MetricOneValue="62"
+                                              MetricOnePercent="62.00%"
+                                              MetricOnePeriod="W"
+                                              Countdown="◷ 07:03"
+                                              ResetLabel="18 Aug · reset" />
+                    <Border Grid.Column="1"
+                            Width="1"
+                            Height="40"
+                            Margin="8,0"
+                            VerticalAlignment="Center"
+                            Background="{StaticResource DividerBrush}" />
+                    <local:ProviderRowControl Grid.Column="2"
+                                              Compact="True"
+                                              Provider="Claude"
+                                              Accent="{StaticResource ClaudeBrush}"
+                                              MetricOneValue="5"
+                                              MetricOnePercent="5.00%"
+                                              MetricOnePeriod="5h"
+                                              MetricTwoValue="70"
+                                              MetricTwoPercent="70.00%"
+                                              MetricTwoPeriod="7d"
+                                              HasSecondMetric="True"
+                                              Countdown="◷ 00:30"
+                                              ResetLabel="13 Aug · reset" />
+                </Grid>
             </Grid>
-        </Grid>
         </Border>
     </Viewbox>
 </Window>

@@ -2,9 +2,15 @@ namespace LLMLimitsWidget.FloatingOverlay;
 
 public sealed class WidgetAppearance
 {
-    public double BaseWidth { get; init; } = 285;
-    public double BaseHeight { get; init; } = 112;
+    public double VerticalWidth { get; init; } = 285;
+    public double VerticalHeight { get; init; } = 112;
+    public double HorizontalWidth { get; set; } = 545;
+    public double HorizontalHeight { get; init; } = 64;
     public double Scale { get; set; } = 1.0;
     public double SurfaceOpacity { get; set; } = 1.0;
     public double CornerRadius { get; set; } = 18;
+    public LayoutOrientation Orientation { get; set; } = LayoutOrientation.Vertical;
+
+    public double BaseWidth => Orientation == LayoutOrientation.Vertical ? VerticalWidth : HorizontalWidth;
+    public double BaseHeight => Orientation == LayoutOrientation.Vertical ? VerticalHeight : HorizontalHeight;
 }

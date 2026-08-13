@@ -25,7 +25,7 @@ public partial class MainWindow : Window
 
     private void Window_Loaded(object sender, RoutedEventArgs e)
     {
-        Surface.Opacity = _appearance.SurfaceOpacity;
+        ApplySurfaceBackgroundOpacity();
         Surface.CornerRadius = new CornerRadius(_appearance.CornerRadius);
         ResetPosition();
     }
@@ -121,6 +121,53 @@ public partial class MainWindow : Window
         RefreshSample();
     }
 
+    private void SurfaceOpacitySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        _appearance.SurfaceOpacity = e.NewValue;
+
+        if (sender is System.Windows.Controls.Slider slider)
+        {
+            slider.ToolTip = $"Прозрачность фона: {e.NewValue:P0}";
+        }
+
+        if (Surface is not null)
+        {
+            ApplySurfaceBackgroundOpacity();
+        }
+    }
+
+    private void ApplySurfaceBackgroundOpacity()
+    {
+        if (FindResource("SurfaceBrush") is not System.Windows.Media.SolidColorBrush surfaceBrush
+            || FindResource("SurfaceBorderBrush") is not System.Windows.Media.SolidColorBrush borderBrush)
+        {
+            return;
+        }
+
+        Surface.Background = WithOpacity(surfaceBrush, _appearance.SurfaceOpacity);
+        Surface.BorderBrush = WithOpacity(borderBrush, _appearance.SurfaceOpacity);
+    }
+
+    private static System.Windows.Media.SolidColorBrush WithOpacity(
+        System.Windows.Media.SolidColorBrush sourceBrush,
+        double opacity)
+    {
+        var color = sourceBrush.Color;
+        var alpha = (byte)Math.Round(color.A * opacity);
+        return new System.Windows.Media.SolidColorBrush(
+            System.Windows.Media.Color.FromArgb(alpha, color.R, color.G, color.B));
+    }
+
+    private void VerticalLayoutMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        SetOrientation(LayoutOrientation.Vertical);
+    }
+
+    private void HorizontalLayoutMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        SetOrientation(LayoutOrientation.Horizontal);
+    }
+
     private void ResetPositionMenuItem_Click(object sender, RoutedEventArgs e)
     {
         ResetPosition();
@@ -146,6 +193,25 @@ public partial class MainWindow : Window
     {
         // Provider adapters will replace the mock values after the visual spike.
         ToolTip = $"Mock refreshed {DateTime.Now:HH:mm:ss}";
+    }
+
+    private void SetOrientation(LayoutOrientation orientation)
+    {
+        var center = new System.Windows.Point(Left + (Width / 2), Top + (Height / 2));
+        _appearance.Orientation = orientation;
+        VerticalLayout.Visibility = orientation == LayoutOrientation.Vertical ? Visibility.Visible : Visibility.Collapsed;
+        HorizontalLayout.Visibility = orientation == LayoutOrientation.Horizontal ? Visibility.Visible : Visibility.Collapsed;
+        if (orientation == LayoutOrientation.Horizontal)
+        {
+            HorizontalLayout.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
+            _appearance.HorizontalWidth = HorizontalLayout.DesiredSize.Width + 20;
+        }
+        Surface.Width = _appearance.BaseWidth;
+        Surface.Height = _appearance.BaseHeight;
+        Width = _appearance.BaseWidth * _appearance.Scale;
+        Height = _appearance.BaseHeight * _appearance.Scale;
+        Left = center.X - (Width / 2);
+        Top = center.Y - (Height / 2);
     }
 
     private void ApplyScale(double scale, bool keepCenter)
