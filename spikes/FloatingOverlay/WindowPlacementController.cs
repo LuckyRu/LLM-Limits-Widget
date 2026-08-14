@@ -142,13 +142,18 @@ internal readonly record struct EdgeConstraints(bool Left, bool Top, bool Right,
     public static EdgeConstraints All => new(true, true, true, true);
 }
 
-internal sealed class WindowPlacementController : IDisposable
+internal interface IWindowZOrderController
+{
+    bool EnsureTopmostOnce();
+    bool SetTopmostBand(bool topmost);
+}
+
+internal sealed class WindowPlacementController : IDisposable, IWindowZOrderController
 {
     private const int WmMoving = 0x0216;
     private const int WmEnterSizeMove = 0x0231;
     private const int WmExitSizeMove = 0x0232;
     private const int WmWindowPosChanging = 0x0046;
-    private const int WmActivateApp = 0x001C;
     private const int WmDisplayChange = 0x007E;
     private const int WmSettingChange = 0x001A;
     private const int WmDpiChanged = 0x02E0;
@@ -171,8 +176,6 @@ internal sealed class WindowPlacementController : IDisposable
     private IntPtr _lastDragMonitor;
     private WindowPlacementSettings? _pendingRestore;
     private readonly System.Windows.Threading.DispatcherTimer _topologyTimer;
-    private readonly System.Windows.Threading.DispatcherTimer _topmostTimer;
-    private int _topmostPassesRemaining;
 
     public WindowPlacementController(System.Windows.Window window)
     {
@@ -183,31 +186,32 @@ internal sealed class WindowPlacementController : IDisposable
             TopologyTimer_Tick,
             window.Dispatcher);
         _topologyTimer.Stop();
-        _topmostTimer = new System.Windows.Threading.DispatcherTimer(
-            TimeSpan.FromMilliseconds(75),
-            System.Windows.Threading.DispatcherPriority.Input,
-            TopmostTimer_Tick,
-            window.Dispatcher);
-        _topmostTimer.Stop();
     }
 
     public event EventHandler? PlacementCommitted;
 
-    public void ReassertTopmost()
+    public bool EnsureTopmostOnce()
     {
-        EnsureTopmost();
-        _topmostPassesRemaining = 4;
-        _topmostTimer.Stop();
-        _topmostTimer.Start();
+        return SetTopmostBand(true);
     }
 
-    private void TopmostTimer_Tick(object? sender, EventArgs e)
+    public bool SetTopmostBand(bool topmost)
     {
-        EnsureTopmost();
-        if (--_topmostPassesRemaining <= 0)
+        if (_disposed || !_window.IsVisible)
         {
-            _topmostTimer.Stop();
+            return false;
         }
+
+        EnsureAttached();
+        return _handle != IntPtr.Zero
+            && SetWindowPos(
+                _handle,
+                topmost ? HwndTopmost : new IntPtr(-2),
+                0,
+                0,
+                0,
+                0,
+                SwpNoMove | SwpNoSize | SwpNoActivate);
     }
 
     public void Attach()
@@ -455,7 +459,6 @@ internal sealed class WindowPlacementController : IDisposable
 
         _disposed = true;
         _topologyTimer.Stop();
-        _topmostTimer.Stop();
         _source?.RemoveHook(WindowProc);
         _source = null;
     }
@@ -494,10 +497,6 @@ internal sealed class WindowPlacementController : IDisposable
         else if (message == WmWindowPosChanging && lParam != IntPtr.Zero && !_applyingPlacement)
         {
             ConstrainWindowPosition(lParam);
-        }
-        else if (message == WmActivateApp && wParam == IntPtr.Zero)
-        {
-            ReassertTopmost();
         }
         else if (message is WmDisplayChange or WmSettingChange or WmDpiChanged
                  || (message == WmPowerBroadcast && wParam.ToInt32() == PbtApmResumeAutomatic))
@@ -761,29 +760,6 @@ internal sealed class WindowPlacementController : IDisposable
         {
             _applyingPlacement = false;
         }
-    }
-
-    private void EnsureTopmost()
-    {
-        if (_disposed)
-        {
-            return;
-        }
-
-        EnsureAttached();
-        if (_handle == IntPtr.Zero)
-        {
-            return;
-        }
-
-        SetWindowPos(
-            _handle,
-            HwndTopmost,
-            0,
-            0,
-            0,
-            0,
-            SwpNoMove | SwpNoSize | SwpNoActivate);
     }
 
     [StructLayout(LayoutKind.Sequential)]

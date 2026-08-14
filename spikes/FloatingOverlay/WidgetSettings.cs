@@ -7,16 +7,26 @@ namespace LLMLimitsWidget.FloatingOverlay;
 
 public sealed class WidgetSettings
 {
-    public int SchemaVersion { get; set; } = 2;
+    public const int CurrentSchemaVersion = 3;
+
+    public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public LayoutOrientation Orientation { get; set; } = LayoutOrientation.Vertical;
     public double Scale { get; set; } = 1.0;
     public double SurfaceOpacity { get; set; } = 1.0;
     public double CornerRadius { get; set; } = 18;
+    public bool GhostModeEnabled { get; set; }
     public WindowPlacementSettings? Placement { get; set; }
+
+    [JsonIgnore]
+    public bool CanPersist { get; private set; } = true;
 
     public void Normalize()
     {
-        SchemaVersion = 2;
+        CanPersist = SchemaVersion <= CurrentSchemaVersion;
+        if (CanPersist)
+        {
+            SchemaVersion = CurrentSchemaVersion;
+        }
         Scale = double.IsFinite(Scale) ? Math.Clamp(Scale, 0.6, 2.0) : 1.0;
         SurfaceOpacity = double.IsFinite(SurfaceOpacity) ? Math.Clamp(SurfaceOpacity, 0.2, 1.0) : 1.0;
         CornerRadius = double.IsFinite(CornerRadius) ? Math.Clamp(CornerRadius, 0, 32) : 18;
@@ -26,6 +36,17 @@ public sealed class WidgetSettings
             Placement.RelativeY = double.IsFinite(Placement.RelativeY) ? Math.Clamp(Placement.RelativeY, 0, 1) : 1;
             Placement.IsValid &= Placement.MonitorWidth > 0 && Placement.MonitorHeight > 0;
         }
+    }
+}
+
+internal static class GhostStartupPolicy
+{
+    public static bool ShouldRestore(
+        bool persistedPreference,
+        bool suppressPersistedGhost,
+        bool recoveryChannelAvailable)
+    {
+        return persistedPreference && !suppressPersistedGhost && recoveryChannelAvailable;
     }
 }
 
@@ -105,6 +126,10 @@ public static class WidgetSettingsStore
         try
         {
             settings.Normalize();
+            if (!settings.CanPersist)
+            {
+                return;
+            }
             var directory = Path.GetDirectoryName(SettingsPath);
             if (directory is null)
             {

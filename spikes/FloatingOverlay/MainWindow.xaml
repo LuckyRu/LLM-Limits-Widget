@@ -11,10 +11,11 @@
         ResizeMode="NoResize"
         ShowInTaskbar="False"
         Topmost="True"
+        ShowActivated="False"
         SnapsToDevicePixels="True"
         TextOptions.TextFormattingMode="Display"
         Loaded="Window_Loaded"
-        Closing="Window_Closing"
+        IsVisibleChanged="Window_IsVisibleChanged"
         Closed="Window_Closed"
         SourceInitialized="Window_SourceInitialized"
         Deactivated="Window_Deactivated"
@@ -24,7 +25,7 @@
         PreviewMouseLeftButtonUp="Window_PreviewMouseLeftButtonUp"
         PreviewMouseMove="Window_PreviewMouseMove">
     <Window.Resources>
-        <ContextMenu x:Key="WidgetContextMenu" Opened="WidgetContextMenu_Opened">
+        <ContextMenu x:Key="WidgetContextMenu" Opened="WidgetContextMenu_Opened" Closed="WidgetContextMenu_Closed">
             <MenuItem Header="Вертикальная раскладка" Click="VerticalLayoutMenuItem_Click" />
             <MenuItem Header="Горизонтальная раскладка" Click="HorizontalLayoutMenuItem_Click" />
             <Separator />
@@ -66,8 +67,9 @@
                 BorderBrush="{StaticResource SurfaceBorderBrush}"
                 BorderThickness="1"
                 ContextMenu="{StaticResource WidgetContextMenu}"
+                ContextMenuOpening="Surface_ContextMenuOpening"
                 MouseLeftButtonDown="Surface_MouseLeftButtonDown">
-            <Grid>
+            <Grid x:Name="Root">
                 <Grid x:Name="VerticalLayout">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="47" />

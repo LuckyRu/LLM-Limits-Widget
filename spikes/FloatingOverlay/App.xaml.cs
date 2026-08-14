@@ -1,6 +1,8 @@
 using System.Drawing;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Interop;
 using FormsContextMenuStrip = System.Windows.Forms.ContextMenuStrip;
 using FormsNotifyIcon = System.Windows.Forms.NotifyIcon;
 using FormsToolStripMenuItem = System.Windows.Forms.ToolStripMenuItem;
@@ -13,31 +15,126 @@ public partial class App : System.Windows.Application
     private FormsContextMenuStrip? _trayMenu;
     private Icon? _trayIconAsset;
     private Stream? _trayIconStream;
+    private FormsToolStripMenuItem? _ghostModeMenuItem;
+    private IntPtr _foregroundBeforeTray;
+    private bool _widgetHiddenForTrayRecovery;
+    private bool _appExiting;
 
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        MainWindow = new MainWindow();
-        MainWindow.Show();
-        MainWindow.Activate();
+        var suppressPersistedGhost = e.Args.Any(
+            argument => string.Equals(argument, "--no-ghost", StringComparison.OrdinalIgnoreCase));
+        MainWindow = new MainWindow(suppressPersistedGhost);
 
-        _trayMenu = new FormsContextMenuStrip();
-        _trayMenu.Items.Add(new FormsToolStripMenuItem("Показать виджет", null, (_, _) => ShowWidget()));
-        _trayMenu.Items.Add(new FormsToolStripMenuItem("Сбросить позицию", null, (_, _) => ResetWidgetPosition()));
-        _trayMenu.Items.Add(new FormsToolStripMenuItem("Выйти", null, (_, _) => Shutdown()));
-        _trayIconAsset = LoadTrayIcon();
-        _trayIcon = new FormsNotifyIcon
+        try
         {
-            Icon = _trayIconAsset ?? SystemIcons.Application,
-            Text = "LLM Limits Widget",
-            Visible = true,
-            ContextMenuStrip = _trayMenu
-        };
-        _trayIcon.DoubleClick += (_, _) => ShowWidget();
+            _trayMenu = new FormsContextMenuStrip();
+            _ghostModeMenuItem = new FormsToolStripMenuItem("Режим призрака")
+            {
+                CheckOnClick = false
+            };
+            _ghostModeMenuItem.Click += (_, _) =>
+            {
+                if (MainWindow is MainWindow widget)
+                {
+                    var result = widget.SetGhostMode(
+                        !(widget.IsGhostModeEnabled || widget.GhostCleanupRequired),
+                        _foregroundBeforeTray);
+                    UpdateGhostMenuStatus(widget, result);
+                    EnsureTrayMenuAboveOverlay();
+                }
+            };
+            _trayMenu.Opening += (_, _) =>
+            {
+                CaptureForegroundBeforeTray();
+                var overlayDemoted = true;
+                if (MainWindow is MainWindow widget)
+                {
+                    overlayDemoted = widget.SetTrayMenuOpen(true);
+                }
+                var menuRaised = EnsureTrayMenuAboveOverlay();
+                if (ManagementMenuZOrder.ShouldHideOverlayForRecovery(overlayDemoted, menuRaised)
+                    && MainWindow is MainWindow { IsVisible: true } failedWidget)
+                {
+                    failedWidget.ReportManagementMenuFailure();
+                    failedWidget.Hide();
+                    _widgetHiddenForTrayRecovery = true;
+                }
+            };
+            _trayMenu.Opened += (_, _) =>
+            {
+                if (MainWindow is MainWindow widget)
+                {
+                    UpdateGhostMenuStatus(widget, widget.LastGhostModeResult);
+                }
+            };
+            _trayMenu.Closed += (_, _) =>
+            {
+                if (MainWindow is MainWindow widget)
+                {
+                    widget.SetTrayMenuOpen(false);
+                    if (_widgetHiddenForTrayRecovery && !_appExiting)
+                    {
+                        widget.Show();
+                        widget.EnsureVisible();
+                    }
+                }
+                _widgetHiddenForTrayRecovery = false;
+                _foregroundBeforeTray = IntPtr.Zero;
+            };
+            _trayMenu.Items.Add(_ghostModeMenuItem);
+            _trayMenu.Items.Add(new FormsToolStripMenuItem("Показать виджет", null, (_, _) => ShowWidget()));
+            _trayMenu.Items.Add(new FormsToolStripMenuItem("Сбросить позицию", null, (_, _) => ResetWidgetPosition()));
+            _trayMenu.Items.Add(new FormsToolStripMenuItem("Выйти", null, (_, _) => ExitApplication()));
+            _trayIconAsset = LoadTrayIcon();
+            _trayIcon = new FormsNotifyIcon
+            {
+                Icon = _trayIconAsset ?? SystemIcons.Application,
+                Text = "LLM Limits Widget",
+                Visible = true,
+                ContextMenuStrip = _trayMenu
+            };
+            _trayIcon.MouseDown += (_, _) =>
+            {
+                _foregroundBeforeTray = IntPtr.Zero;
+                CaptureForegroundBeforeTray();
+            };
+            _trayIcon.DoubleClick += (_, _) => ShowWidget();
+        }
+        catch (Exception exception) when (exception is InvalidOperationException
+                                          or ExternalException
+                                          or ArgumentException)
+        {
+            _trayIcon?.Dispose();
+            _trayIcon = null;
+            _trayMenu?.Dispose();
+            _trayMenu = null;
+        }
+
+        if (MainWindow is MainWindow initialWidget)
+        {
+            initialWidget.SetRecoveryChannelAvailable(_trayIcon is not null);
+            initialWidget.GhostModeChanged += (_, enabled) =>
+            {
+                UpdateGhostMenuStatus(initialWidget, initialWidget.LastGhostModeResult);
+            };
+        }
+
+        MainWindow.Show();
+        if (MainWindow is MainWindow loadedWidget)
+        {
+            UpdateGhostMenuStatus(loadedWidget, loadedWidget.LastGhostModeResult);
+        }
+        if (MainWindow is MainWindow shownWidget && !shownWidget.IsGhostInputSuppressed)
+        {
+            MainWindow.Activate();
+        }
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _appExiting = true;
         if (_trayIcon is not null)
         {
             _trayIcon.Visible = false;
@@ -50,11 +147,103 @@ public partial class App : System.Windows.Application
         base.OnExit(e);
     }
 
+    private void ExitApplication()
+    {
+        _appExiting = true;
+        Shutdown();
+    }
+
     private Icon? LoadTrayIcon()
     {
         _trayIconStream = typeof(App).Assembly.GetManifestResourceStream(
             "LLMLimitsWidget.FloatingOverlay.Assets.llm-limits-tray.ico");
         return _trayIconStream is null ? null : new Icon(_trayIconStream);
+    }
+
+    private void CaptureForegroundBeforeTray()
+    {
+        var foreground = GetForegroundWindow();
+        if (MainWindow is not MainWindow widget)
+        {
+            _foregroundBeforeTray = foreground;
+            return;
+        }
+
+        var widgetHandle = new WindowInteropHelper(widget).Handle;
+        if (IsEligibleExternalWindow(_foregroundBeforeTray, widgetHandle))
+        {
+            return;
+        }
+
+        if (IsEligibleExternalWindow(foreground, widgetHandle))
+        {
+            _foregroundBeforeTray = foreground;
+            return;
+        }
+
+        _foregroundBeforeTray = FindNextExternalWindow(widgetHandle);
+    }
+
+    private static IntPtr FindNextExternalWindow(IntPtr widgetHandle)
+    {
+        for (var candidate = GetWindow(widgetHandle, 2);
+             candidate != IntPtr.Zero;
+             candidate = GetWindow(candidate, 2))
+        {
+            if (IsEligibleExternalWindow(candidate, widgetHandle))
+            {
+                return candidate;
+            }
+        }
+
+        return IntPtr.Zero;
+    }
+
+    private static bool IsEligibleExternalWindow(IntPtr candidate, IntPtr widgetHandle)
+    {
+        if (candidate == IntPtr.Zero
+            || candidate == widgetHandle
+            || !IsWindowVisible(candidate)
+            || GetAncestor(candidate, 2) != candidate)
+        {
+            return false;
+        }
+
+        GetWindowThreadProcessId(candidate, out var processId);
+        return processId != (uint)Environment.ProcessId;
+    }
+
+    private void UpdateGhostMenuStatus(MainWindow widget, GhostModeTransitionResult result)
+    {
+        if (_ghostModeMenuItem is null)
+        {
+            return;
+        }
+
+        _ghostModeMenuItem.Checked = widget.IsGhostModeEnabled || widget.GhostCleanupRequired;
+        var failed = result is not (GhostModeTransitionResult.Success
+            or GhostModeTransitionResult.AlreadyInRequestedState)
+            || widget.GhostCleanupRequired;
+        _ghostModeMenuItem.Text = widget.GhostCleanupRequired
+            ? "Режим призрака (требуется восстановление)"
+            : failed
+                ? "Режим призрака (ошибка)"
+                : "Режим призрака";
+        _ghostModeMenuItem.ToolTipText = failed
+            ? $"Не удалось изменить режим: {result}"
+            : widget.HooksAvailable
+                ? "Виджет виден, но пропускает весь ввод"
+                : "Ввод пропускается; topmost поддерживается резервным watchdog";
+    }
+
+    private bool EnsureTrayMenuAboveOverlay()
+    {
+        if (_trayMenu is not null && !_trayMenu.IsDisposed)
+        {
+            return ManagementMenuZOrder.EnsureAboveOverlay(_trayMenu.Handle);
+        }
+
+        return false;
     }
 
     private void ShowWidget()
@@ -70,7 +259,10 @@ public partial class App : System.Windows.Application
         {
             widget.EnsureVisible();
         }
-        MainWindow.Activate();
+        if (MainWindow is MainWindow shownWidget && !shownWidget.IsGhostInputSuppressed)
+        {
+            MainWindow.Activate();
+        }
     }
 
     private void ResetWidgetPosition()
@@ -83,6 +275,25 @@ public partial class App : System.Windows.Application
         widget.Show();
         widget.WindowState = WindowState.Normal;
         widget.ResetWidgetPosition();
-        widget.Activate();
+        if (!widget.IsGhostInputSuppressed)
+        {
+            widget.Activate();
+        }
     }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetWindow(IntPtr hwnd, uint command);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindowVisible(IntPtr hwnd);
 }
