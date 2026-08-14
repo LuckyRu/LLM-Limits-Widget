@@ -9,11 +9,14 @@ internal sealed class OverlayZOrderSupervisor : IDisposable
     [
         TimeSpan.FromMilliseconds(75),
         TimeSpan.FromMilliseconds(75),
-        TimeSpan.FromMilliseconds(150)
+        TimeSpan.FromMilliseconds(150),
+        TimeSpan.FromMilliseconds(300),
+        TimeSpan.FromMilliseconds(600)
     ];
 
     private const uint EventSystemForeground = 0x0003;
     private const uint EventObjectShow = 0x8002;
+    private const uint EventObjectReorder = 0x8004;
     private const int ObjidWindow = -4;
     private const int ChildIdSelf = 0;
     private const uint WineventOutOfContext = 0;
@@ -27,10 +30,13 @@ internal sealed class OverlayZOrderSupervisor : IDisposable
     private readonly WinEventDelegate _winEventCallback;
     private IntPtr _foregroundHook;
     private IntPtr _showHook;
+    private IntPtr _reorderHook;
     private volatile bool _disposed;
     private volatile bool _visible;
     private volatile bool _menuOpen;
     private int _burstStep;
+    private int _burstExtensionsRemaining;
+    private bool _burstExtensionRequested;
     private int _eventDispatchPending;
     private bool _topmostHealthy = true;
 
@@ -55,7 +61,9 @@ internal sealed class OverlayZOrderSupervisor : IDisposable
         _burstTimer.Stop();
     }
 
-    public bool HooksAvailable => _foregroundHook != IntPtr.Zero && _showHook != IntPtr.Zero;
+    public bool HooksAvailable => _foregroundHook != IntPtr.Zero
+        && _showHook != IntPtr.Zero
+        && _reorderHook != IntPtr.Zero;
 
     public event EventHandler<bool>? TopmostHealthChanged;
 
@@ -88,8 +96,16 @@ internal sealed class OverlayZOrderSupervisor : IDisposable
             0,
             0,
             WineventOutOfContext | WineventSkipOwnProcess);
+        var reorderHook = SetWinEventHook(
+            EventObjectReorder,
+            EventObjectReorder,
+            IntPtr.Zero,
+            _winEventCallback,
+            0,
+            0,
+            WineventOutOfContext | WineventSkipOwnProcess);
 
-        if (foregroundHook == IntPtr.Zero || showHook == IntPtr.Zero)
+        if (foregroundHook == IntPtr.Zero || showHook == IntPtr.Zero || reorderHook == IntPtr.Zero)
         {
             if (foregroundHook != IntPtr.Zero)
             {
@@ -101,11 +117,17 @@ internal sealed class OverlayZOrderSupervisor : IDisposable
                 UnhookWinEvent(showHook);
             }
 
+            if (reorderHook != IntPtr.Zero)
+            {
+                UnhookWinEvent(reorderHook);
+            }
+
             return false;
         }
 
         _foregroundHook = foregroundHook;
         _showHook = showHook;
+        _reorderHook = reorderHook;
         return true;
     }
 
@@ -149,6 +171,10 @@ internal sealed class OverlayZOrderSupervisor : IDisposable
 
         if (_burstTimer.IsEnabled)
         {
+            if (!string.Equals(reason, "watchdog", StringComparison.Ordinal))
+            {
+                _burstExtensionRequested = true;
+            }
             return _topmostHealthy;
         }
 
@@ -158,6 +184,8 @@ internal sealed class OverlayZOrderSupervisor : IDisposable
         }
 
         _burstStep = 0;
+        _burstExtensionsRemaining = 1;
+        _burstExtensionRequested = false;
         _burstTimer.Interval = BurstIntervals[0];
         _burstTimer.Start();
         return true;
@@ -189,7 +217,7 @@ internal sealed class OverlayZOrderSupervisor : IDisposable
 
     private void BurstTimer_Tick(object? sender, EventArgs e)
     {
-        if (_disposed || !_visible || _menuOpen || _burstStep >= 3)
+        if (_disposed || !_visible || _menuOpen)
         {
             _burstTimer.Stop();
             return;
@@ -197,8 +225,17 @@ internal sealed class OverlayZOrderSupervisor : IDisposable
 
         EnsureTopmostCore();
         _burstStep++;
-        if (_burstStep >= 3)
+        if (_burstStep >= BurstIntervals.Length)
         {
+            if (_burstExtensionRequested && _burstExtensionsRemaining > 0)
+            {
+                _burstExtensionRequested = false;
+                _burstExtensionsRemaining--;
+                _burstStep = 0;
+                _burstTimer.Interval = BurstIntervals[0];
+                return;
+            }
+
             _burstTimer.Stop();
             return;
         }
@@ -210,6 +247,8 @@ internal sealed class OverlayZOrderSupervisor : IDisposable
     {
         _burstTimer.Stop();
         _burstStep = 0;
+        _burstExtensionsRemaining = 0;
+        _burstExtensionRequested = false;
         Interlocked.Exchange(ref _eventDispatchPending, 0);
     }
 
@@ -239,7 +278,7 @@ internal sealed class OverlayZOrderSupervisor : IDisposable
             return;
         }
 
-        if (eventType == EventObjectShow
+        if (eventType is EventObjectShow or EventObjectReorder
             && (idObject != ObjidWindow
                 || idChild != ChildIdSelf
                 || GetAncestor(hwnd, GaRoot) != hwnd))
@@ -257,7 +296,13 @@ internal sealed class OverlayZOrderSupervisor : IDisposable
             () =>
             {
                 Interlocked.Exchange(ref _eventDispatchPending, 0);
-                Reassert(eventType == EventSystemForeground ? "foreground" : "top-level-show");
+                var reason = eventType switch
+                {
+                    EventSystemForeground => "foreground",
+                    EventObjectShow => "top-level-show",
+                    _ => "top-level-reorder"
+                };
+                Reassert(reason);
             },
             System.Windows.Threading.DispatcherPriority.Input);
     }
@@ -274,6 +319,12 @@ internal sealed class OverlayZOrderSupervisor : IDisposable
         {
             UnhookWinEvent(_showHook);
             _showHook = IntPtr.Zero;
+        }
+
+        if (_reorderHook != IntPtr.Zero)
+        {
+            UnhookWinEvent(_reorderHook);
+            _reorderHook = IntPtr.Zero;
         }
     }
 

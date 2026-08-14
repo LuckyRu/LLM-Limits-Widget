@@ -140,12 +140,12 @@ AssertEqual(
     GhostTransitionPolicy.ResolveTopmostFailure(GhostModeTransitionResult.StyleWriteFailed),
     "topmost failure with failed rollback is reported");
 AssertEqual(
-    "75,150,300",
+    "75,150,300,600,1200",
     string.Join(",", OverlayZOrderSupervisor.BurstIntervals
         .Select((interval, index) => OverlayZOrderSupervisor.BurstIntervals
             .Take(index + 1)
             .Sum(item => item.TotalMilliseconds))),
-    "topmost burst uses cumulative 75/150/300ms schedule");
+    "topmost burst covers the full Shell flyout animation window");
 AssertEqual(true, ManagementMenuZOrder.ShouldHideOverlayForRecovery(false, false), "menu fallback hides overlay");
 AssertEqual(false, ManagementMenuZOrder.ShouldHideOverlayForRecovery(true, false), "menu demotion avoids hide fallback");
 AssertEqual(false, ManagementMenuZOrder.ShouldHideOverlayForRecovery(false, true), "raised menu avoids hide fallback");
@@ -173,7 +173,7 @@ if (failures.Count > 0)
     return 1;
 }
 
-Console.WriteLine($"Placement, settings, and ghost lifecycle: {cases.Length + 48} cases passed.");
+Console.WriteLine($"Placement, settings, and ghost lifecycle: {cases.Length + 50} cases passed.");
 return 0;
 
 void AssertEqual<T>(T expected, T actual, string name)
@@ -229,6 +229,17 @@ void RunNativeLifecycleChecks()
 
             using var placement = new WindowPlacementController(window);
             placement.Attach();
+            window.Topmost = true;
+            var competitor = CreateTestWindow(new Grid());
+            competitor.Topmost = true;
+            competitor.Show();
+            var competitorHandle = new WindowInteropHelper(competitor).Handle;
+            AssertEqual(true, placement.EnsureTopmostOnce(), "topmost promotion succeeds");
+            AssertEqual(
+                true,
+                IsWindowAbove(handle, competitorHandle),
+                "topmost promotion moves widget above a competing topmost window");
+            competitor.Close();
             window.Hide();
             AssertEqual(false, placement.EnsureTopmostOnce(), "hidden widget is not re-shown by topmost enforcement");
             AssertEqual(false, IsWindowVisible(handle), "hidden native window stays hidden");
@@ -304,6 +315,21 @@ static long ReadExtendedStyle(IntPtr handle)
     return value.ToInt64();
 }
 
+static bool IsWindowAbove(IntPtr expectedHigher, IntPtr expectedLower)
+{
+    for (var candidate = GetWindow(expectedHigher, 2);
+         candidate != IntPtr.Zero;
+         candidate = GetWindow(candidate, 2))
+    {
+        if (candidate == expectedLower)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
 static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
 
@@ -313,6 +339,9 @@ static extern int GetWindowLong(IntPtr hwnd, int index);
 [DllImport("user32.dll")]
 [return: MarshalAs(UnmanagedType.Bool)]
 static extern bool IsWindowVisible(IntPtr hwnd);
+
+[DllImport("user32.dll")]
+static extern IntPtr GetWindow(IntPtr hwnd, uint command);
 
 [DllImport("kernel32.dll", SetLastError = true)]
 static extern void SetLastError(int errorCode);

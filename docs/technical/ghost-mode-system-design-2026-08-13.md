@@ -161,12 +161,13 @@ Reassert запускается после:
 - `WM_DISPLAYCHANGE`, `WM_DPICHANGED`, resume/unlock и восстановления Explorer;
 - `EVENT_SYSTEM_FOREGROUND` через `SetWinEventHook`;
 - `EVENT_OBJECT_SHOW` для нового top-level window (`idObject == OBJID_WINDOW`, `idChild == CHILDID_SELF`);
+- `EVENT_OBJECT_REORDER` только для top-level window — этот сигнал закрывает повторное поднятие Windows 11 Shell flyout внутри topmost-band;
 - завершения app-owned tray menu;
 - срабатывания watchdog, если событий оказалось недостаточно.
 
 WinEvent hooks регистрируются как `WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS`. Callback не вызывает WPF и `SetWindowPos` напрямую: он только ставит coalesced request в Dispatcher, чтобы не выполнять native/WPF работу на чужом event callback и не создавать рекурсию от собственных событий.
 
-`EVENT_OBJECT_REORDER` не используется как основной глобальный сигнал: он шумный и документирован прежде всего для изменения порядка дочерних объектов. Пропущенные перестановки верхнего уровня закрывает watchdog.
+Шумные дочерние `EVENT_OBJECT_REORDER` отбрасываются проверкой `OBJID_WINDOW`, `CHILDID_SELF` и `GA_ROOT`. Повторные top-level сигналы coalesce-ятся и могут только один раз продлить текущий bounded burst. Пропущенные перестановки закрывает watchdog.
 
 ### 5.3 Алгоритм reassert
 
@@ -178,11 +179,17 @@ SetWindowPos(
   HWND_TOPMOST,
   0, 0, 0, 0,
   SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
+
+SetWindowPos(
+  hwnd,
+  HWND_TOP,
+  0, 0, 0, 0,
+  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
 ```
 
-Координаты, размер, monitor affinity и placement при этом не меняются. `SWP_NOACTIVATE` обязателен: восстановление z-order никогда не должно забирать foreground focus.
+Первый вызов подтверждает членство в topmost-band, второй поднимает уже topmost-окно на вершину самой группы — выше созданного позже Shell flyout. Координаты, размер, monitor affinity и placement при этом не меняются. `SWP_NOACTIVATE` обязателен: восстановление z-order никогда не должно забирать foreground focus.
 
-Каждый внешний сигнал запускает coalesced burst: немедленно, затем примерно через `75`, `150` и `300 ms`. Burst закрывает последовательность Shell-окон, создаваемых несколькими шагами. Одновременно работает watchdog с периодом `1000 ms`, но только пока overlay видим. Повторный запрос во время активного burst объединяется с текущим, а не создаёт ещё один timer chain.
+Каждый внешний сигнал запускает coalesced burst: немедленно, затем примерно через `75`, `150`, `300`, `600` и `1200 ms`. Burst закрывает полную анимацию Windows 11 Shell flyout, создаваемого несколькими шагами. Один новый сигнал во время активного burst может продлить его ещё на один ограниченный цикл; неограниченная timer chain не создаётся. Одновременно работает watchdog с периодом `1000 ms`, но только пока overlay видим.
 
 Целевые показатели:
 

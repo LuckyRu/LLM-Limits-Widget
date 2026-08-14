@@ -160,7 +160,9 @@ internal sealed class WindowPlacementController : IDisposable, IWindowZOrderCont
     private const int WmPowerBroadcast = 0x0218;
     private const int PbtApmResumeAutomatic = 0x0012;
     private const uint MonitorDefaultToNearest = 2;
+    private static readonly IntPtr HwndTop = IntPtr.Zero;
     private static readonly IntPtr HwndTopmost = new(-1);
+    private static readonly IntPtr HwndNotTopmost = new(-2);
     private const uint SwpNoActivate = 0x0010;
     private const uint SwpNoZOrder = 0x0004;
     private const uint SwpNoSize = 0x0001;
@@ -203,10 +205,25 @@ internal sealed class WindowPlacementController : IDisposable, IWindowZOrderCont
         }
 
         EnsureAttached();
-        return _handle != IntPtr.Zero
-            && SetWindowPos(
+        if (_handle == IntPtr.Zero
+            || !SetWindowPos(
                 _handle,
-                topmost ? HwndTopmost : new IntPtr(-2),
+                topmost ? HwndTopmost : HwndNotTopmost,
+                0,
+                0,
+                0,
+                0,
+                SwpNoMove | SwpNoSize | SwpNoActivate))
+        {
+            return false;
+        }
+
+        // HWND_TOPMOST guarantees membership in the topmost band. HWND_TOP then
+        // moves an already-topmost window to the front of that band, above Shell flyouts.
+        return !topmost
+            || SetWindowPos(
+                _handle,
+                HwndTop,
                 0,
                 0,
                 0,
