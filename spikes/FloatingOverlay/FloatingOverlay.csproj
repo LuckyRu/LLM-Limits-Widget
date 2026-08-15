@@ -8,6 +8,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\llm-limits-tray.ico</ApplicationIcon>
     <AssemblyName>LLMLimitsWidget.FloatingOverlay</AssemblyName>
     <RootNamespace>LLMLimitsWidget.FloatingOverlay</RootNamespace>
   </PropertyGroup>

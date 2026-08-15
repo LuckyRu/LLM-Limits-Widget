@@ -508,12 +508,57 @@ public partial class MainWindow : Window
             snapshot.TryGetProvider(LimitProviderId.Claude, out var claude) ? claude : null,
             ClaudeVerticalRow,
             ClaudeHorizontalRow);
+        RefreshContentSize();
         ToolTip = $"Лимиты обновлены: {snapshot.UpdatedAt.ToLocalTime():HH:mm:ss}";
         WidgetLogger.Debug(
             "Wpf",
             "snapshot_rendered",
             ("codexStatus", snapshot.TryGetProvider(LimitProviderId.Codex, out var codex) ? codex.Status : LimitDataStatus.Unavailable),
             ("claudeStatus", snapshot.TryGetProvider(LimitProviderId.Claude, out var claudeSnapshot) ? claudeSnapshot.Status : LimitDataStatus.Unavailable));
+    }
+
+    private void RefreshContentSize()
+    {
+        if (!_isLoaded || _appearance.Orientation != LayoutOrientation.Horizontal)
+        {
+            return;
+        }
+
+        // The horizontal layout is intentionally auto-sized. Its desired width
+        // changes when real provider data replaces the neutral startup state
+        // (reset times and labels are usually longer), so the outer Window must
+        // be resized after every rendered snapshot.
+        UpdateLayout();
+        HorizontalLayout.Measure(new System.Windows.Size(
+            double.PositiveInfinity,
+            double.PositiveInfinity));
+
+        var contentWidth = HorizontalLayout.DesiredSize.Width
+            + Surface.Padding.Left
+            + Surface.Padding.Right
+            + Surface.BorderThickness.Left
+            + Surface.BorderThickness.Right;
+        var nextBaseWidth = Math.Max(1, contentWidth);
+        if (Math.Abs(nextBaseWidth - _appearance.BaseWidth) < 0.5)
+        {
+            return;
+        }
+
+        var previousPlacement = _placementController.Capture();
+        _appearance.HorizontalWidth = nextBaseWidth;
+        Surface.Width = _appearance.BaseWidth;
+        Surface.Height = _appearance.BaseHeight;
+        Width = _appearance.BaseWidth * _appearance.Scale;
+        Height = _appearance.BaseHeight * _appearance.Scale;
+        UpdateLayout();
+        _placementController.Restore(previousPlacement);
+
+        WidgetLogger.Debug(
+            "Wpf",
+            "content_size_refreshed",
+            ("orientation", _appearance.Orientation),
+            ("width", Width),
+            ("height", Height));
     }
 
     private static void ApplyProviderSnapshot(
