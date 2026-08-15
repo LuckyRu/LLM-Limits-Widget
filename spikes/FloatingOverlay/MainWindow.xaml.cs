@@ -1,7 +1,9 @@
+using System.ComponentModel;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
+using LLMLimitsWidget.Presentation;
 using Microsoft.Win32;
 
 namespace LLMLimitsWidget.FloatingOverlay;
@@ -18,6 +20,10 @@ public partial class MainWindow : Window
     private readonly CountdownViewModel _codexCountdown = new();
     private readonly CountdownViewModel _claudeCountdown = new();
     private readonly bool _suppressPersistedGhost;
+    private readonly bool _useArchitectureV2;
+    private ArchitectureV2CompositionRoot? _architectureV2Composition;
+    private WidgetViewModel? _architectureV2ViewModel;
+    private PropertyChangedEventHandler? _architectureV2PropertyChanged;
     private static readonly System.Windows.Media.Brush CriticalCountdownBrush =
         new System.Windows.Media.SolidColorBrush(
             System.Windows.Media.Color.FromRgb(255, 183, 77));
@@ -37,11 +43,14 @@ public partial class MainWindow : Window
     private bool _widgetContextMenuDemoted;
     private bool _widgetContextMenuFallback;
 
-    public MainWindow(bool suppressPersistedGhost = false)
+    public MainWindow(
+        bool suppressPersistedGhost = false,
+        bool useArchitectureV2 = false)
     {
         _settings = WidgetSettingsStore.Load();
         _ghostPreference = suppressPersistedGhost ? false : _settings.GhostModeEnabled;
         _suppressPersistedGhost = suppressPersistedGhost;
+        _useArchitectureV2 = useArchitectureV2;
         _appearance.Orientation = _settings.Orientation;
         _appearance.Scale = _settings.Scale;
         _scale = _settings.Scale;
@@ -100,7 +109,14 @@ public partial class MainWindow : Window
             LastGhostModeResult = ApplyGhostModeTransition(true);
         }
         PersistSettings();
-        _limitsCoordinator.Start();
+        if (!_useArchitectureV2)
+        {
+            _limitsCoordinator.Start();
+        }
+        else
+        {
+            ApplyArchitectureV2ViewModel();
+        }
         WidgetLogger.Info(
             "Wpf",
             "window_loaded",
@@ -119,6 +135,59 @@ public partial class MainWindow : Window
         _placementController.Attach();
         _ghostModeController.Attach();
         HooksAvailable = _zOrderSupervisor.Attach();
+    }
+
+    public void AttachArchitectureV2(ArchitectureV2CompositionRoot composition)
+    {
+        if (!_useArchitectureV2)
+        {
+            return;
+        }
+
+        _architectureV2Composition = composition;
+        AttachArchitectureV2(composition.ViewModel);
+    }
+
+    private void AttachArchitectureV2(WidgetViewModel viewModel)
+    {
+        if (!_useArchitectureV2)
+        {
+            return;
+        }
+
+        if (_architectureV2ViewModel is not null && _architectureV2PropertyChanged is not null)
+        {
+            DetachArchitectureV2Notifications(_architectureV2ViewModel, _architectureV2PropertyChanged);
+        }
+
+        _architectureV2ViewModel = viewModel;
+        _architectureV2PropertyChanged = (_, _) => ApplyArchitectureV2ViewModel();
+        AttachArchitectureV2Notifications(viewModel, _architectureV2PropertyChanged);
+        ApplyArchitectureV2ViewModel();
+    }
+
+    private static void AttachArchitectureV2Notifications(
+        WidgetViewModel viewModel,
+        PropertyChangedEventHandler handler)
+    {
+        viewModel.Codex.PropertyChanged += handler;
+        viewModel.Codex.FiveHours.PropertyChanged += handler;
+        viewModel.Codex.SevenDays.PropertyChanged += handler;
+        viewModel.Claude.PropertyChanged += handler;
+        viewModel.Claude.FiveHours.PropertyChanged += handler;
+        viewModel.Claude.SevenDays.PropertyChanged += handler;
+    }
+
+    private static void DetachArchitectureV2Notifications(
+        WidgetViewModel viewModel,
+        PropertyChangedEventHandler handler)
+    {
+        viewModel.Codex.PropertyChanged -= handler;
+        viewModel.Codex.FiveHours.PropertyChanged -= handler;
+        viewModel.Codex.SevenDays.PropertyChanged -= handler;
+        viewModel.Claude.PropertyChanged -= handler;
+        viewModel.Claude.FiveHours.PropertyChanged -= handler;
+        viewModel.Claude.SevenDays.PropertyChanged -= handler;
     }
 
     private void Surface_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -470,6 +539,16 @@ public partial class MainWindow : Window
 
     private async Task RefreshLimitsAsync(bool force = false)
     {
+        if (_useArchitectureV2)
+        {
+            WidgetLogger.Debug("Wpf", "legacy_refresh_skipped_for_architecture_v2", ("force", force));
+            if (_architectureV2Composition is not null)
+            {
+                await _architectureV2Composition.RequestManualRefreshAsync().ConfigureAwait(false);
+            }
+            return;
+        }
+
         try
         {
             WidgetLogger.Debug("Wpf", "refresh_requested", ("force", force));
@@ -482,6 +561,95 @@ public partial class MainWindow : Window
         {
             WidgetLogger.Error("Wpf", "refresh_request_failed", exception, ("force", force));
         }
+    }
+
+    private void ApplyArchitectureV2ViewModel()
+    {
+        if (!_useArchitectureV2 || _architectureV2ViewModel is null)
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.Now;
+        ApplyArchitectureV2Row(
+            _architectureV2ViewModel.Codex,
+            CodexVerticalRow,
+            CodexHorizontalRow,
+            now);
+        ApplyArchitectureV2Row(
+            _architectureV2ViewModel.Claude,
+            ClaudeVerticalRow,
+            ClaudeHorizontalRow,
+            now);
+        RefreshContentSize();
+
+        var next = _architectureV2ViewModel.GetNextVisualChangeAt(now);
+        if (next is null)
+        {
+            _countdownTimer.Stop();
+            return;
+        }
+
+        var delay = next.Value - now;
+        _countdownTimer.Interval = delay > TimeSpan.FromMilliseconds(50)
+            ? delay
+            : TimeSpan.FromMilliseconds(50);
+        _countdownTimer.Start();
+    }
+
+    private static void ApplyArchitectureV2Row(
+        ProviderRowViewModel viewModel,
+        ProviderRowControl verticalRow,
+        ProviderRowControl horizontalRow,
+        DateTimeOffset now)
+    {
+        var primary = viewModel.Provider == global::LLMLimitsWidget.Domain.ProviderId.Claude
+            ? viewModel.FiveHours
+            : viewModel.SevenDays;
+        var secondary = viewModel.Provider == global::LLMLimitsWidget.Domain.ProviderId.Claude
+            ? viewModel.SevenDays
+            : null;
+        var urgency = CountdownFormatter.GetUrgency(primary.ResetAtUtc, now);
+        var resetLabel = secondary?.ResetAtUtc is { } secondaryReset
+            ? $"{secondaryReset.ToLocalTime():dd MMM} · {secondaryReset.ToLocalTime():HH:mm}"
+            : primary.ResetAtUtc is { } primaryReset
+                ? $"{primaryReset.ToLocalTime():dd MMM} · {primaryReset.ToLocalTime():HH:mm}"
+                : string.Empty;
+        ApplyArchitectureV2Metric(verticalRow, primary, secondary, urgency, resetLabel, viewModel);
+        ApplyArchitectureV2Metric(horizontalRow, primary, secondary, urgency, resetLabel, viewModel);
+    }
+
+    private static void ApplyArchitectureV2Metric(
+        ProviderRowControl row,
+        LimitWindowViewModel primary,
+        LimitWindowViewModel? secondary,
+        CountdownUrgency urgency,
+        string resetLabel,
+        ProviderRowViewModel provider)
+    {
+        row.MetricOneValue = primary.IsVisible ? (double)ExtractPercent(primary.PercentText) : 0;
+        row.MetricOnePercent = primary.PercentText;
+        row.MetricOnePeriod = primary.IsVisible
+            ? provider.Provider == global::LLMLimitsWidget.Domain.ProviderId.Claude ? "5h" : "W"
+            : string.Empty;
+        row.MetricTwoValue = secondary?.IsVisible == true ? (double)ExtractPercent(secondary.PercentText) : 0;
+        row.MetricTwoPercent = secondary?.PercentText ?? string.Empty;
+        row.MetricTwoPeriod = secondary?.IsVisible == true ? "7d" : string.Empty;
+        row.HasSecondMetric = secondary?.IsVisible == true;
+        row.Countdown = primary.CountdownText;
+        row.CountdownBrush = GetCountdownBrush(urgency, row.Accent);
+        row.ResetLabel = resetLabel;
+        row.ToolTip = provider.HasData
+            ? $"{provider.Provider}: {provider.Freshness}"
+            : "Данные ещё не получены";
+    }
+
+    private static decimal ExtractPercent(string value)
+    {
+        var text = value.Trim().TrimEnd('%').Trim();
+        return decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : 0;
     }
 
     private void LimitsCoordinator_SnapshotChanged(LimitsSnapshot snapshot)
@@ -762,6 +930,12 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (_useArchitectureV2)
+        {
+            ApplyArchitectureV2ViewModel();
+            return;
+        }
+
         RefreshCountdownPresentation(DateTimeOffset.Now);
     }
 
@@ -868,6 +1042,10 @@ public partial class MainWindow : Window
         _zOrderSupervisor.TopmostHealthChanged -= ZOrderSupervisor_TopmostHealthChanged;
         _zOrderSupervisor.Dispose();
         _ghostModeController.Dispose();
+        if (_architectureV2ViewModel is not null && _architectureV2PropertyChanged is not null)
+        {
+            DetachArchitectureV2Notifications(_architectureV2ViewModel, _architectureV2PropertyChanged);
+        }
         _limitsCoordinator.SnapshotChanged -= LimitsCoordinator_SnapshotChanged;
         SystemEvents.PowerModeChanged -= SystemEvents_PowerModeChanged;
         _limitsCoordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();

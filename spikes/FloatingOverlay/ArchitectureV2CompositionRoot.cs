@@ -81,6 +81,20 @@ public sealed class ArchitectureV2CompositionRoot : IAsyncDisposable
             priority: true).ConfigureAwait(false);
     }
 
+    public async Task RequestManualRefreshAsync()
+    {
+        foreach (var provider in Enum.GetValues<ProviderId>())
+        {
+            await _store.DispatchAsync(
+                new RequestProviderRefreshCommand(
+                    provider,
+                    RefreshReason.Manual,
+                    _clock.GetUtcNow(),
+                    Guid.NewGuid()),
+                priority: true).ConfigureAwait(false);
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (!_started)

@@ -26,6 +26,7 @@
 - [Architecture v2: M8 Claude signal pump](technical/architecture-v2-m8-implementation-2026-08-15.md) — FileSystemWatcher, debounce/coalescing и публикация statusLine в single-writer Store.
 - [Architecture v2: M9 Presentation/ViewModel](technical/architecture-v2-m9-implementation-2026-08-15.md) — pure VM contract, compact percent/countdown formatting и change-only notifications.
 - [Architecture v2: M10 WPF composition](technical/architecture-v2-m10-implementation-2026-08-15.md) — feature-flagged composition root, Dispatcher bridge и lifecycle wiring.
+- [Architecture v2: M11 WPF ViewModel cutover](technical/architecture-v2-m11-implementation-2026-08-15.md) — rows из нового VM, manual refresh через Store и оптимизированный countdown render.
 
 ## Правила ведения
 

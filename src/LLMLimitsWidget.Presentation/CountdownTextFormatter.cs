@@ -37,4 +37,40 @@ public static class CountdownTextFormatter
 
         return $"in {remaining.Days / 7} wk {remaining.Days % 7} d";
     }
+
+    public static DateTimeOffset? GetNextVisualChangeAt(
+        DateTimeOffset? resetAtUtc,
+        DateTimeOffset nowUtc)
+    {
+        if (resetAtUtc is null)
+        {
+            return null;
+        }
+
+        var remaining = resetAtUtc.Value - nowUtc;
+        if (remaining <= TimeSpan.Zero)
+        {
+            return nowUtc.AddSeconds(1);
+        }
+
+        if (remaining < TimeSpan.FromMinutes(1))
+        {
+            return nowUtc.AddSeconds(1);
+        }
+
+        if (remaining < TimeSpan.FromDays(1))
+        {
+            var withinMinute = new TimeSpan(0, 0, 0, remaining.Seconds, remaining.Milliseconds);
+            return nowUtc.Add(TimeSpan.FromMinutes(1) - withinMinute);
+        }
+
+        if (remaining < TimeSpan.FromDays(7))
+        {
+            return nowUtc.Add(TimeSpan.FromHours(1) -
+                new TimeSpan(0, remaining.Hours, remaining.Minutes, remaining.Seconds, remaining.Milliseconds));
+        }
+
+        return nowUtc.Add(TimeSpan.FromDays(1) -
+            new TimeSpan(0, remaining.Hours, remaining.Minutes, remaining.Seconds, remaining.Milliseconds));
+    }
 }

@@ -49,11 +49,13 @@ public partial class App : System.Windows.Application
 
         var suppressPersistedGhost = e.Args.Any(
             argument => string.Equals(argument, "--no-ghost", StringComparison.OrdinalIgnoreCase));
-        MainWindow = new MainWindow(suppressPersistedGhost);
+        var architectureV2Enabled = ArchitectureV2CompositionRoot.IsEnabled(e.Args);
+        MainWindow = new MainWindow(suppressPersistedGhost, architectureV2Enabled);
 
-        if (ArchitectureV2CompositionRoot.IsEnabled(e.Args))
+        if (architectureV2Enabled)
         {
             _architectureV2 = ArchitectureV2CompositionRoot.Create(Dispatcher);
+            ((MainWindow)MainWindow).AttachArchitectureV2(_architectureV2);
             _architectureV2StartTask = StartArchitectureV2Async(_architectureV2);
             WidgetLogger.Info("ArchitectureV2", "composition_feature_enabled");
         }

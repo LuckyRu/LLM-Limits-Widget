@@ -24,6 +24,17 @@ public sealed class WidgetViewModel : INotifyPropertyChanged
         Claude.Apply(state.Providers[ProviderId.Claude], nowUtc);
     }
 
+    public DateTimeOffset? GetNextVisualChangeAt(DateTimeOffset nowUtc) =>
+        new[]
+        {
+            Codex.GetNextVisualChangeAt(nowUtc),
+            Claude.GetNextVisualChangeAt(nowUtc)
+        }
+        .Where(value => value.HasValue)
+        .Select(value => value!.Value)
+        .OrderBy(value => value)
+        .FirstOrDefault();
+
     internal void Notify(string propertyName) => PropertyChanged?.Invoke(
         this,
         new PropertyChangedEventArgs(propertyName));
@@ -50,6 +61,19 @@ public sealed class ProviderRowViewModel : INotifyPropertyChanged
     public LimitWindowViewModel SevenDays => _sevenDays;
 
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    public DateTimeOffset? GetNextVisualChangeAt(DateTimeOffset nowUtc) =>
+        new[]
+        {
+            _fiveHours.ResetAtUtc,
+            _sevenDays.ResetAtUtc
+        }
+        .Where(value => value.HasValue)
+        .Select(value => CountdownTextFormatter.GetNextVisualChangeAt(value, nowUtc))
+        .Where(value => value.HasValue)
+        .Select(value => value!.Value)
+        .OrderBy(value => value)
+        .FirstOrDefault();
 
     public void Apply(ProviderState state, DateTimeOffset nowUtc)
     {

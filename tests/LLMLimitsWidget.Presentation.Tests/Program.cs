@@ -42,6 +42,10 @@ AssertEqual(secondChangeCount, changed, "V-004 avoids redundant property notific
 
 AssertEqual("in 45 sec", CountdownTextFormatter.Format(now.AddSeconds(45), now), "V-005 formats seconds");
 AssertEqual("in 2 d 4 hr", CountdownTextFormatter.Format(now.AddDays(2).AddHours(4), now), "V-005 formats days");
+AssertEqual(
+    now.AddSeconds(30),
+    CountdownTextFormatter.GetNextVisualChangeAt(now.AddHours(3).AddMinutes(39).AddSeconds(30), now),
+    "V-006 schedules next minute boundary");
 
 if (failures.Count > 0)
 {
