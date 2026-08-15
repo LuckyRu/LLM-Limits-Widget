@@ -40,7 +40,9 @@ public partial class App : System.Windows.Application
             ("arguments", string.Join(" ", e.Args)));
         base.OnStartup(e);
 
-        if (!TryAcquireSingleInstance())
+        var architectureV2Enabled = ArchitectureV2CompositionRoot.IsEnabled(e.Args);
+
+        if (!TryAcquireSingleInstance(architectureV2Enabled))
         {
             WidgetLogger.Info("App", "duplicate_instance_exit");
             Shutdown();
@@ -49,7 +51,6 @@ public partial class App : System.Windows.Application
 
         var suppressPersistedGhost = e.Args.Any(
             argument => string.Equals(argument, "--no-ghost", StringComparison.OrdinalIgnoreCase));
-        var architectureV2Enabled = ArchitectureV2CompositionRoot.IsEnabled(e.Args);
         MainWindow = new MainWindow(suppressPersistedGhost, architectureV2Enabled);
 
         if (architectureV2Enabled)
@@ -233,13 +234,15 @@ public partial class App : System.Windows.Application
         }
     }
 
-    private bool TryAcquireSingleInstance()
+    private bool TryAcquireSingleInstance(bool architectureV2Enabled)
     {
         try
         {
             _singleInstanceMutex = new Mutex(
                 initiallyOwned: false,
-                name: "Local\\LLMLimitsWidget.FloatingOverlay",
+                name: architectureV2Enabled
+                    ? "Local\\LLMLimitsWidget.FloatingOverlay.ArchitectureV2"
+                    : "Local\\LLMLimitsWidget.FloatingOverlay",
                 createdNew: out _);
             try
             {
