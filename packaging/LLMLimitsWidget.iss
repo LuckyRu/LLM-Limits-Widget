@@ -11,7 +11,7 @@
 #endif
 
 #ifndef RequiresRuntime
-  #define RequiresRuntime 0
+  #define RequiresRuntime "0"
 #endif
 
 #ifndef RuntimeInstallerPath
@@ -40,7 +40,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
 [Files]
-#if RequiresRuntime == 1
+#if "1" == RequiresRuntime
 Source: "{#RuntimeInstallerPath}"; DestDir: "{tmp}"; Flags: dontcopy
 #endif
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -51,12 +51,12 @@ Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Parameters: "--no-ghost"; Description: "Запустить {#MyAppName}"; Flags: nowait postinstall skipifsilent
 
-#if RequiresRuntime == 1
+#if "1" == RequiresRuntime
 [Code]
 function HasWindowsDesktopRuntime10(): Boolean;
 var
   RuntimeOutputPath: string;
-  RuntimeOutput: string;
+  RuntimeOutput: AnsiString;
   ResultCode: Integer;
 begin
   Result := False;
