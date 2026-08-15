@@ -52,6 +52,44 @@ internal static class CountdownFormatter
                 ? CountdownUrgency.Near
                 : CountdownUrgency.Normal;
     }
+
+    /// <summary>
+    /// Returns the earliest moment at which the formatted text or its urgency
+    /// can visibly change. The caller can sleep until this instant instead of
+    /// redrawing once a second.
+    /// </summary>
+    public static DateTimeOffset? GetNextVisualChangeAt(DateTimeOffset? resetAt, DateTimeOffset now)
+    {
+        if (resetAt is not { } target || target <= now)
+        {
+            return null;
+        }
+
+        var remaining = target - now;
+        var unit = remaining >= TimeSpan.FromHours(24)
+            ? TimeSpan.FromHours(1)
+            : TimeSpan.FromMinutes(1);
+        var next = GetNextBoundary(target, now, unit);
+
+        foreach (var threshold in new[] { TimeSpan.FromHours(1), TimeSpan.FromMinutes(10) })
+        {
+            var transition = target - threshold;
+            if (transition > now && transition < next)
+            {
+                next = transition;
+            }
+        }
+
+        return next;
+    }
+
+    private static DateTimeOffset GetNextBoundary(DateTimeOffset target, DateTimeOffset now, TimeSpan unit)
+    {
+        var remaining = target - now;
+        var completedUnits = (long)Math.Floor(remaining.Ticks / (double)unit.Ticks);
+        var next = target - TimeSpan.FromTicks(completedUnits * unit.Ticks);
+        return next > now ? next : next + unit;
+    }
 }
 
 internal enum CountdownUrgency

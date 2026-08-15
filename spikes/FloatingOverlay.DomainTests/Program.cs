@@ -86,6 +86,31 @@ AssertEqual(
     CountdownUrgency.Critical,
     CountdownFormatter.GetUrgency(countdownNow.AddMinutes(8), countdownNow),
     "countdown urgency changes within ten minutes");
+AssertEqual(
+    countdownNow.AddSeconds(30),
+    CountdownFormatter.GetNextVisualChangeAt(countdownNow.AddMinutes(42).AddSeconds(30), countdownNow),
+    "countdown scheduler waits until the next visible minute change");
+AssertEqual(
+    countdownNow.AddHours(1),
+    CountdownFormatter.GetNextVisualChangeAt(countdownNow.AddDays(2).AddHours(4), countdownNow),
+    "distant countdowns redraw only when their displayed hour changes");
+AssertEqual(
+    null,
+    CountdownFormatter.GetNextVisualChangeAt(null, countdownNow),
+    "countdown scheduler sleeps when no reset is known");
+var countdownViewModel = new CountdownViewModel();
+AssertEqual(
+    true,
+    countdownViewModel.Update(countdownNow.AddMinutes(42).AddSeconds(30), countdownNow),
+    "countdown view model renders its first value");
+AssertEqual(
+    false,
+    countdownViewModel.Update(countdownViewModel.ResetAt, countdownNow.AddSeconds(10)),
+    "countdown view model avoids a redraw while text is unchanged");
+AssertEqual(
+    true,
+    countdownViewModel.Update(countdownViewModel.ResetAt, countdownNow.AddSeconds(31)),
+    "countdown view model redraws when its text changes");
 
 var statusLineFixture = """
 {
@@ -286,7 +311,6 @@ static async Task RunRealProviderSmokeAsync()
 }
 
 void AssertEqual<T>(T expected, T actual, string name)
-    where T : notnull
 {
     if (!EqualityComparer<T>.Default.Equals(expected, actual))
     {

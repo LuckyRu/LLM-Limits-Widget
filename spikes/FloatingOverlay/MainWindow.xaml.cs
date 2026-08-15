@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Threading;
 using Microsoft.Win32;
 
 namespace LLMLimitsWidget.FloatingOverlay;
@@ -13,6 +14,9 @@ public partial class MainWindow : Window
     private readonly GhostModeController _ghostModeController;
     private readonly OverlayZOrderSupervisor _zOrderSupervisor;
     private readonly LimitsCoordinator _limitsCoordinator;
+    private readonly DispatcherTimer _countdownTimer;
+    private readonly CountdownViewModel _codexCountdown = new();
+    private readonly CountdownViewModel _claudeCountdown = new();
     private readonly bool _suppressPersistedGhost;
     private static readonly System.Windows.Media.Brush CriticalCountdownBrush =
         new System.Windows.Media.SolidColorBrush(
@@ -44,6 +48,11 @@ public partial class MainWindow : Window
         _appearance.SurfaceOpacity = _settings.SurfaceOpacity;
         _appearance.CornerRadius = _settings.CornerRadius;
         InitializeComponent();
+        _countdownTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
+        {
+            IsEnabled = false
+        };
+        _countdownTimer.Tick += CountdownTimer_Tick;
         _placementController = new WindowPlacementController(this);
         _ghostModeController = new GhostModeController(this, Root);
         _zOrderSupervisor = new OverlayZOrderSupervisor(_placementController, Dispatcher);
@@ -505,14 +514,18 @@ public partial class MainWindow : Window
 
     private void ApplyLimitsSnapshot(LimitsSnapshot snapshot)
     {
+        var now = DateTimeOffset.Now;
         ApplyProviderSnapshot(
             snapshot.TryGetProvider(LimitProviderId.Codex, out var codexSnapshot) ? codexSnapshot : null,
             CodexVerticalRow,
-            CodexHorizontalRow);
+            CodexHorizontalRow,
+            now);
         ApplyProviderSnapshot(
             snapshot.TryGetProvider(LimitProviderId.Claude, out var claude) ? claude : null,
             ClaudeVerticalRow,
-            ClaudeHorizontalRow);
+            ClaudeHorizontalRow,
+            now);
+        UpdateCountdownPresentation(codexSnapshot, claude, now, force: true);
         RefreshContentSize();
         ToolTip = $"Лимиты обновлены: {snapshot.UpdatedAt.ToLocalTime():HH:mm:ss}";
         WidgetLogger.Debug(
@@ -569,7 +582,21 @@ public partial class MainWindow : Window
     private static void ApplyProviderSnapshot(
         ProviderLimitsSnapshot? snapshot,
         ProviderRowControl verticalRow,
-        ProviderRowControl horizontalRow)
+        ProviderRowControl horizontalRow,
+        DateTimeOffset now)
+    {
+        var layout = GetProviderMetricLayout(snapshot);
+        var countdown = CountdownFormatter.Format(layout.CountdownReset, now);
+        var resetLabel = layout.ResetLabelReset is { } reset
+            ? $"{reset.ToLocalTime():dd MMM} · {reset.ToLocalTime():HH:mm}"
+            : "—";
+        var urgency = CountdownFormatter.GetUrgency(layout.CountdownReset, now);
+
+        ApplyMetric(verticalRow, layout.First, layout.Second, countdown, resetLabel, snapshot, urgency);
+        ApplyMetric(horizontalRow, layout.First, layout.Second, countdown, resetLabel, snapshot, urgency);
+    }
+
+    private static ProviderMetricLayout GetProviderMetricLayout(ProviderLimitsSnapshot? snapshot)
     {
         var windows = snapshot?.Windows ?? Array.Empty<LimitWindowSnapshot>();
         var first = snapshot?.Provider == LimitProviderId.Claude
@@ -593,14 +620,14 @@ public partial class MainWindow : Window
         var resetLabelReset = snapshot?.Provider == LimitProviderId.Claude
             ? second?.ResetAt
             : countdownReset;
-        var countdown = CountdownFormatter.Format(countdownReset, DateTimeOffset.Now);
-        var resetLabel = resetLabelReset is { } reset
-            ? $"{reset.ToLocalTime():dd MMM} · {reset.ToLocalTime():HH:mm}"
-            : "—";
-
-        ApplyMetric(verticalRow, first, second, countdown, resetLabel, snapshot);
-        ApplyMetric(horizontalRow, first, second, countdown, resetLabel, snapshot);
+        return new ProviderMetricLayout(first, second, countdownReset, resetLabelReset);
     }
+
+    private sealed record ProviderMetricLayout(
+        LimitWindowSnapshot? First,
+        LimitWindowSnapshot? Second,
+        DateTimeOffset? CountdownReset,
+        DateTimeOffset? ResetLabelReset);
 
     private static void ApplyMetric(
         ProviderRowControl row,
@@ -608,7 +635,8 @@ public partial class MainWindow : Window
         LimitWindowSnapshot? second,
         string countdown,
         string resetLabel,
-        ProviderLimitsSnapshot? snapshot)
+        ProviderLimitsSnapshot? snapshot,
+        CountdownUrgency urgency)
     {
         row.MetricOneValue = first?.SafeRemainingPercent ?? 0;
         row.MetricOnePercent = FormatPercent(first?.SafeRemainingPercent);
@@ -618,7 +646,7 @@ public partial class MainWindow : Window
         row.MetricTwoPeriod = second?.Label ?? string.Empty;
         row.HasSecondMetric = second is not null;
         row.Countdown = countdown;
-        row.CountdownBrush = GetCountdownBrush(first?.ResetAt, row.Accent);
+        row.CountdownBrush = GetCountdownBrush(urgency, row.Accent);
         row.ResetLabel = resetLabel;
         row.ToolTip = snapshot?.ErrorMessage is { Length: > 0 } error
             ? $"{snapshot.Status}: {error}"
@@ -633,15 +661,108 @@ public partial class MainWindow : Window
     }
 
     private static System.Windows.Media.Brush GetCountdownBrush(
-        DateTimeOffset? resetAt,
+        CountdownUrgency urgency,
         System.Windows.Media.Brush providerAccent)
     {
-        return CountdownFormatter.GetUrgency(resetAt, DateTimeOffset.Now) switch
+        return urgency switch
         {
             CountdownUrgency.Critical => CriticalCountdownBrush,
             CountdownUrgency.Near => providerAccent,
             _ => System.Windows.Media.Brushes.White
         };
+    }
+
+    private void UpdateCountdownPresentation(
+        ProviderLimitsSnapshot? codexSnapshot,
+        ProviderLimitsSnapshot? claudeSnapshot,
+        DateTimeOffset now,
+        bool force)
+    {
+        _ = _codexCountdown.Update(
+            GetProviderMetricLayout(codexSnapshot).CountdownReset,
+            now);
+        _ = _claudeCountdown.Update(
+            GetProviderMetricLayout(claudeSnapshot).CountdownReset,
+            now);
+        if (force)
+        {
+            ApplyCountdown(CodexVerticalRow, _codexCountdown);
+            ApplyCountdown(CodexHorizontalRow, _codexCountdown);
+        }
+        if (force)
+        {
+            ApplyCountdown(ClaudeVerticalRow, _claudeCountdown);
+            ApplyCountdown(ClaudeHorizontalRow, _claudeCountdown);
+        }
+
+        ScheduleNextCountdownRender(now);
+    }
+
+    private void RefreshCountdownPresentation(DateTimeOffset now)
+    {
+        var codexChanged = _codexCountdown.Update(_codexCountdown.ResetAt, now);
+        var claudeChanged = _claudeCountdown.Update(_claudeCountdown.ResetAt, now);
+        if (codexChanged)
+        {
+            ApplyCountdown(CodexVerticalRow, _codexCountdown);
+            ApplyCountdown(CodexHorizontalRow, _codexCountdown);
+        }
+        if (claudeChanged)
+        {
+            ApplyCountdown(ClaudeVerticalRow, _claudeCountdown);
+            ApplyCountdown(ClaudeHorizontalRow, _claudeCountdown);
+        }
+
+        ScheduleNextCountdownRender(now);
+    }
+
+    private static void ApplyCountdown(ProviderRowControl row, CountdownViewModel viewModel)
+    {
+        if (!string.Equals(row.Countdown, viewModel.Text, StringComparison.Ordinal))
+        {
+            row.Countdown = viewModel.Text;
+        }
+
+        var brush = GetCountdownBrush(viewModel.Urgency, row.Accent);
+        if (!ReferenceEquals(row.CountdownBrush, brush))
+        {
+            row.CountdownBrush = brush;
+        }
+    }
+
+    private void ScheduleNextCountdownRender(DateTimeOffset now)
+    {
+        var next = new[]
+            {
+                _codexCountdown.GetNextVisualChangeAt(now),
+                _claudeCountdown.GetNextVisualChangeAt(now)
+            }
+            .Where(candidate => candidate.HasValue)
+            .Select(candidate => candidate!.Value)
+            .DefaultIfEmpty()
+            .Min();
+        if (next == default)
+        {
+            _countdownTimer.Stop();
+            return;
+        }
+
+        var delay = next - now;
+        _countdownTimer.Interval = delay > TimeSpan.FromMilliseconds(50)
+            ? delay
+            : TimeSpan.FromMilliseconds(50);
+        _countdownTimer.Start();
+    }
+
+    private void CountdownTimer_Tick(object? sender, EventArgs e)
+    {
+        _countdownTimer.Stop();
+        if (!_isLoaded)
+        {
+            return;
+        }
+
+        RefreshCountdownPresentation(DateTimeOffset.Now);
     }
 
     private void SetOrientation(LayoutOrientation orientation)
@@ -741,6 +862,8 @@ public partial class MainWindow : Window
         }
 
         _zOrderSupervisor.SetVisible(false);
+        _countdownTimer.Stop();
+        _countdownTimer.Tick -= CountdownTimer_Tick;
         PersistSettings();
         _zOrderSupervisor.TopmostHealthChanged -= ZOrderSupervisor_TopmostHealthChanged;
         _zOrderSupervisor.Dispose();
