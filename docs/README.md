@@ -16,6 +16,7 @@
 - [Limits domain and widget data flow](technical/limits-domain-and-widget-data-flow-2026-08-15.md) — provider-neutral модели, coordinator, обновление обеих раскладок, stale/unavailable semantics и lifecycle.
 - [Architecture v2: системный дизайн](technical/architecture-v2-system-design-2026-08-15.md) — целевые границы домена, глобальный immutable state, independent provider pipelines, typed errors, concurrency/lifecycle и стратегия тестирования.
 - [Architecture v2: ТЗ на реализацию](technical/architecture-v2-implementation-spec-2026-08-15.md) — deliverables, use cases, нормативные flows, state tables, этапы миграции и обязательная матрица тестов.
+- [Architecture v2: M1 implementation](technical/architecture-v2-m1-implementation-2026-08-15.md) — фактически созданный Domain-срез, его границы, текущие ограничения и команды проверки.
 
 ## Правила ведения
 
