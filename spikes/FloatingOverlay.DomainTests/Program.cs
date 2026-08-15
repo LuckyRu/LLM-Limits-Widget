@@ -57,6 +57,36 @@ AssertEqual(73d, parsedClaude.Windows[0].SafeRemainingPercent!.Value, "Claude pa
 AssertEqual(53d, parsedClaude.Windows[1].SafeRemainingPercent!.Value, "Claude parser converts weekly usage");
 AssertEqual(true, parsedClaude.Windows.All(window => window.ResetAt.HasValue), "Claude parser reads reset timestamps");
 
+var countdownNow = new DateTimeOffset(2026, 8, 15, 12, 0, 0, TimeSpan.FromHours(3));
+AssertEqual(
+    "in 3h 40m",
+    CountdownFormatter.Format(countdownNow.AddHours(3).AddMinutes(40), countdownNow),
+    "countdown keeps hours and minutes near the cutoff");
+AssertEqual(
+    "in 42m",
+    CountdownFormatter.Format(countdownNow.AddMinutes(42), countdownNow),
+    "countdown compresses to minutes below one hour");
+AssertEqual(
+    "in 8m",
+    CountdownFormatter.Format(countdownNow.AddMinutes(8), countdownNow),
+    "countdown stays compact when the cutoff is imminent");
+AssertEqual(
+    "in 2d 4h",
+    CountdownFormatter.Format(countdownNow.AddDays(2).AddHours(4), countdownNow),
+    "countdown uses days and hours for distant resets");
+AssertEqual(
+    CountdownUrgency.Normal,
+    CountdownFormatter.GetUrgency(countdownNow.AddHours(3), countdownNow),
+    "countdown urgency is normal outside the near window");
+AssertEqual(
+    CountdownUrgency.Near,
+    CountdownFormatter.GetUrgency(countdownNow.AddMinutes(30), countdownNow),
+    "countdown urgency changes within one hour");
+AssertEqual(
+    CountdownUrgency.Critical,
+    CountdownFormatter.GetUrgency(countdownNow.AddMinutes(8), countdownNow),
+    "countdown urgency changes within ten minutes");
+
 var statusLineFixture = """
 {
   "version": "2.1.227",
@@ -142,6 +172,80 @@ AssertEqual(LimitDataStatus.Stale, secondSnapshot.Providers[LimitProviderId.Clau
 AssertEqual(100d, secondSnapshot.Providers[LimitProviderId.Codex].Windows[0].SafeRemainingPercent!.Value, "healthy provider still updates after peer failure");
 await failureIsolatedCoordinator.DisposeAsync();
 
+var stateDirectory = Path.Combine(Path.GetTempPath(), $"llm-limits-state-test-{Guid.NewGuid():N}");
+try
+{
+    var persistedSnapshot = new ProviderLimitsSnapshot(
+        LimitProviderId.Codex,
+        DateTimeOffset.UtcNow,
+        new[] { new LimitWindowSnapshot(LimitWindowKind.Weekly, "W", 67.5, DateTimeOffset.UtcNow.AddDays(2)) });
+    await using (var persistingSupervisor = new ProviderSupervisor(
+                     new FixedSource(LimitProviderId.Codex, persistedSnapshot),
+                     new ProviderStateStore(LimitProviderId.Codex, stateDirectory),
+                     new ProviderRefreshPolicy(TimeSpan.FromMinutes(2), TimeSpan.FromMinutes(30))))
+    {
+        var saved = await persistingSupervisor.ForceRefreshAsync(CancellationToken.None);
+        AssertEqual(LimitDataStatus.Fresh, saved.Status, "supervisor persists a valid successful snapshot");
+    }
+
+    await using (var restoredSupervisor = new ProviderSupervisor(
+                     new ThrowingSource(LimitProviderId.Codex, "temporary network failure"),
+                     new ProviderStateStore(LimitProviderId.Codex, stateDirectory),
+                     new ProviderRefreshPolicy(TimeSpan.FromMinutes(2), TimeSpan.FromMinutes(30))))
+    {
+        var restored = await restoredSupervisor.GetSnapshotAsync(CancellationToken.None);
+        AssertEqual(LimitDataStatus.Stale, restored.Status, "supervisor keeps persisted data after a failed refresh");
+        AssertEqual(67.5d, restored.Windows[0].SafeRemainingPercent!.Value, "persisted value survives a restart");
+    }
+}
+finally
+{
+    if (Directory.Exists(stateDirectory))
+    {
+        Directory.Delete(stateDirectory, recursive: true);
+    }
+}
+
+var backoffStateDirectory = Path.Combine(Path.GetTempPath(), $"llm-limits-backoff-{Guid.NewGuid():N}");
+try
+{
+    await using var backoffSupervisor = new ProviderSupervisor(
+        new ThrowingSource(LimitProviderId.Claude, "login required"),
+        new ProviderStateStore(LimitProviderId.Claude, backoffStateDirectory),
+        new ProviderRefreshPolicy(TimeSpan.FromMinutes(2), TimeSpan.FromMinutes(30)));
+    var first = await backoffSupervisor.GetSnapshotAsync(CancellationToken.None);
+    var second = await backoffSupervisor.GetSnapshotAsync(CancellationToken.None);
+    AssertEqual(LimitDataStatus.ActionRequired, first.Status, "authentication failure is actionable instead of fabricated data");
+    AssertEqual(LimitDataStatus.ActionRequired, second.Status, "backoff preserves the actionable state");
+}
+finally
+{
+    if (Directory.Exists(backoffStateDirectory))
+    {
+        Directory.Delete(backoffStateDirectory, recursive: true);
+    }
+}
+
+var singleFlightStateDirectory = Path.Combine(Path.GetTempPath(), $"llm-limits-single-flight-{Guid.NewGuid():N}");
+try
+{
+    await using var serializedSupervisor = new ProviderSupervisor(
+        new SlowSource(LimitProviderId.Codex),
+        new ProviderStateStore(LimitProviderId.Codex, singleFlightStateDirectory),
+        new ProviderRefreshPolicy(TimeSpan.FromMinutes(2), TimeSpan.FromMinutes(30)));
+    await Task.WhenAll(
+        serializedSupervisor.ForceRefreshAsync(CancellationToken.None),
+        serializedSupervisor.ForceRefreshAsync(CancellationToken.None));
+    AssertEqual(1, SlowSource.MaxConcurrentReads, "supervisor serializes concurrent forced refreshes");
+}
+finally
+{
+    if (Directory.Exists(singleFlightStateDirectory))
+    {
+        Directory.Delete(singleFlightStateDirectory, recursive: true);
+    }
+}
+
 if (runRealSmoke)
 {
     await RunRealProviderSmokeAsync();
@@ -153,7 +257,7 @@ if (failures.Count > 0)
     return 1;
 }
 
-Console.WriteLine("Limits domain: 27 cases passed.");
+Console.WriteLine("Limits domain: all cases passed.");
 return 0;
 
 static async Task RunRealProviderSmokeAsync()
@@ -227,5 +331,54 @@ sealed class FixedForceSource(ProviderLimitsSnapshot snapshot) : IForceRefreshab
     public Task<ProviderLimitsSnapshot> ForceRefreshAsync(CancellationToken cancellationToken)
     {
         return GetSnapshotAsync(cancellationToken);
+    }
+}
+
+sealed class ThrowingSource(LimitProviderId provider, string message) : ILimitsDataSource
+{
+    public LimitProviderId Provider => provider;
+
+    public Task<ProviderLimitsSnapshot> GetSnapshotAsync(CancellationToken cancellationToken) =>
+        Task.FromException<ProviderLimitsSnapshot>(new InvalidOperationException(message));
+}
+
+sealed class SlowSource(LimitProviderId provider) : ILimitsDataSource
+{
+    private static int _activeReads;
+    public static int MaxConcurrentReads;
+
+    public LimitProviderId Provider => provider;
+
+    public async Task<ProviderLimitsSnapshot> GetSnapshotAsync(CancellationToken cancellationToken)
+    {
+        var concurrent = Interlocked.Increment(ref _activeReads);
+        InterlockedExtensions.Max(ref MaxConcurrentReads, concurrent);
+        try
+        {
+            await Task.Delay(75, cancellationToken);
+            return new ProviderLimitsSnapshot(
+                Provider,
+                DateTimeOffset.UtcNow,
+                new[] { new LimitWindowSnapshot(LimitWindowKind.Weekly, "W", 50, DateTimeOffset.UtcNow.AddDays(1)) });
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _activeReads);
+        }
+    }
+}
+
+static class InterlockedExtensions
+{
+    public static void Max(ref int location, int value)
+    {
+        while (true)
+        {
+            var current = Volatile.Read(ref location);
+            if (current >= value || Interlocked.CompareExchange(ref location, value, current) == current)
+            {
+                return;
+            }
+        }
     }
 }

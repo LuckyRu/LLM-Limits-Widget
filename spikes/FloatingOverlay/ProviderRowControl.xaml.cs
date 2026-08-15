@@ -56,6 +56,10 @@ public partial class ProviderRowControl : System.Windows.Controls.UserControl
         nameof(ResetLabel), typeof(string), typeof(ProviderRowControl),
         new FrameworkPropertyMetadata(string.Empty, OnRowChanged));
 
+    public static readonly DependencyProperty CountdownBrushProperty = DependencyProperty.Register(
+        nameof(CountdownBrush), typeof(WpfBrush), typeof(ProviderRowControl),
+        new FrameworkPropertyMetadata(System.Windows.Media.Brushes.White, OnRowChanged));
+
     public ProviderRowControl()
     {
         InitializeComponent();
@@ -74,6 +78,7 @@ public partial class ProviderRowControl : System.Windows.Controls.UserControl
     public bool Compact { get => (bool)GetValue(CompactProperty); set => SetValue(CompactProperty, value); }
     public string Countdown { get => (string)GetValue(CountdownProperty); set => SetValue(CountdownProperty, value); }
     public string ResetLabel { get => (string)GetValue(ResetLabelProperty); set => SetValue(ResetLabelProperty, value); }
+    public WpfBrush CountdownBrush { get => (WpfBrush)GetValue(CountdownBrushProperty); set => SetValue(CountdownBrushProperty, value); }
 
     private static void OnRowChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
@@ -111,6 +116,7 @@ public partial class ProviderRowControl : System.Windows.Controls.UserControl
         MetricTwo.Width = metricWidth;
 
         CountdownText.Text = Countdown;
+        CountdownText.Foreground = CountdownBrush;
         ResetText.Text = ResetLabel;
     }
 

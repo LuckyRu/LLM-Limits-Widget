@@ -18,7 +18,10 @@ public enum LimitWindowKind
 public enum LimitDataStatus
 {
     Fresh,
+    Aging,
     Stale,
+    Recovering,
+    ActionRequired,
     Unavailable,
     Error
 }
@@ -85,6 +88,15 @@ public interface IForceRefreshableLimitsDataSource : ILimitsDataSource
 }
 
 /// <summary>
+/// A source that can notify the host about externally pushed data, for example
+/// the Claude Code status line bridge writing a new snapshot.
+/// </summary>
+public interface ILimitsUpdateSignalSource
+{
+    event EventHandler? UpdateAvailable;
+}
+
+/// <summary>
 /// Coordinates independent provider sources. One failing provider never prevents
 /// the other provider from updating the widget.
 /// </summary>
@@ -105,6 +117,10 @@ public sealed class LimitsCoordinator : IAsyncDisposable
             .GroupBy(source => source.Provider)
             .Select(group => group.First())
             .ToArray();
+        foreach (var supervisor in _sources.OfType<ProviderSupervisor>())
+        {
+            supervisor.SnapshotUpdated += Supervisor_SnapshotUpdated;
+        }
         _refreshInterval = refreshInterval ?? TimeSpan.FromSeconds(30);
 
         if (_refreshInterval <= TimeSpan.Zero)
@@ -136,6 +152,10 @@ public sealed class LimitsCoordinator : IAsyncDisposable
             }
 
             _lifetime = new CancellationTokenSource();
+            foreach (var source in _sources.OfType<ProviderSupervisor>())
+            {
+                source.Start();
+            }
             _refreshLoop = RefreshLoopAsync(_lifetime.Token);
         }
 
@@ -212,6 +232,14 @@ public sealed class LimitsCoordinator : IAsyncDisposable
         }
         finally
         {
+            foreach (var supervisor in _sources.OfType<ProviderSupervisor>())
+            {
+                supervisor.SnapshotUpdated -= Supervisor_SnapshotUpdated;
+            }
+            foreach (var disposable in _sources.OfType<IAsyncDisposable>())
+            {
+                await disposable.DisposeAsync().ConfigureAwait(false);
+            }
             lifetime.Dispose();
         }
     }
@@ -299,5 +327,29 @@ public sealed class LimitsCoordinator : IAsyncDisposable
             ObservedAt = snapshot.ObservedAt == default ? observedAt : snapshot.ObservedAt,
             Windows = windows
         };
+    }
+
+    private void Supervisor_SnapshotUpdated(object? sender, ProviderLimitsSnapshot providerSnapshot)
+    {
+        LimitsSnapshot snapshot;
+        lock (_sync)
+        {
+            var providers = _current.Providers.ToDictionary(pair => pair.Key, pair => pair.Value);
+            providers[providerSnapshot.Provider] = providerSnapshot;
+            snapshot = new LimitsSnapshot(
+                DateTimeOffset.UtcNow,
+                new ReadOnlyDictionary<LimitProviderId, ProviderLimitsSnapshot>(providers));
+            _current = snapshot;
+        }
+
+        try
+        {
+            SnapshotChanged?.Invoke(snapshot);
+        }
+        catch (Exception exception)
+        {
+            WidgetLogger.Error("Limits", "supervisor_snapshot_consumer_failed", exception,
+                ("provider", providerSnapshot.Provider));
+        }
     }
 }

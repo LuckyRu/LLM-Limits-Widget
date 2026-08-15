@@ -33,8 +33,13 @@
             <local:LimitMetricControl x:Name="MetricTwo" Grid.Column="1" HorizontalAlignment="Left" />
         </Grid>
 
-        <StackPanel Grid.Column="2" VerticalAlignment="Center">
-            <TextBlock x:Name="CountdownText" FontSize="14" FontWeight="SemiBold" />
+        <StackPanel Grid.Column="2"
+                    MinWidth="78"
+                    VerticalAlignment="Center">
+            <TextBlock x:Name="CountdownText"
+                       FontSize="12"
+                       FontWeight="SemiBold"
+                       TextOptions.TextFormattingMode="Display" />
             <TextBlock x:Name="ResetText"
                        Style="{StaticResource TinyLabel}"
                        FontSize="11"

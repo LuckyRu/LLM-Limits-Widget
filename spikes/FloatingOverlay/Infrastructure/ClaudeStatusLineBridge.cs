@@ -56,6 +56,7 @@ public static class ClaudeStatusLineBridge
             await File.WriteAllTextAsync(temporaryPath, serialized, cancellationToken)
                 .ConfigureAwait(false);
             File.Move(temporaryPath, path, overwrite: true);
+            ClaudeStatusLineUpdateSignal.Pulse();
             WidgetLogger.Debug(
                 "ClaudeStatusLine",
                 "snapshot_written",
@@ -71,6 +72,29 @@ public static class ClaudeStatusLineBridge
         {
             WidgetLogger.Error("ClaudeStatusLine", "bridge_failed", exception);
             return 0;
+        }
+    }
+}
+
+/// <summary>
+/// The bridge and widget may run in separate processes. The named event gives
+/// the widget a low-latency hint; the snapshot file remains the source of truth
+/// and FileSystemWatcher is retained as a fallback for missed signals.
+/// </summary>
+internal static class ClaudeStatusLineUpdateSignal
+{
+    public const string EventName = "Local\\LLMLimitsWidget.ClaudeStatusLineUpdated";
+
+    public static void Pulse()
+    {
+        try
+        {
+            using var signal = new EventWaitHandle(false, EventResetMode.AutoReset, EventName);
+            signal.Set();
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or WaitHandleCannotBeOpenedException)
+        {
+            WidgetLogger.Debug("ClaudeStatusLine", "update_signal_unavailable");
         }
     }
 }
@@ -140,6 +164,8 @@ public sealed class ClaudeStatusLineLimitsDataSource : ILimitsDataSource
 
     public LimitProviderId Provider => LimitProviderId.Claude;
 
+    public string SnapshotPath => _snapshotPath;
+
     public async Task<ProviderLimitsSnapshot> GetSnapshotAsync(CancellationToken cancellationToken)
     {
         if (!File.Exists(_snapshotPath))
@@ -183,13 +209,20 @@ public sealed class ClaudeStatusLineLimitsDataSource : ILimitsDataSource
     }
 }
 
-public sealed class ClaudeHybridLimitsDataSource : IForceRefreshableLimitsDataSource
+public sealed class ClaudeHybridLimitsDataSource : IForceRefreshableLimitsDataSource, ILimitsUpdateSignalSource, IAsyncDisposable
 {
     private static readonly TimeSpan ActiveFallbackCooldown = TimeSpan.FromMinutes(5);
-    private static readonly TimeSpan InactiveFallbackCooldown = TimeSpan.FromMinutes(15);
+    // If Claude Code has no configured statusLine, this is the only autonomous
+    // refresh path. Keep it bounded so the widget does not remain unchanged for
+    // a quarter hour while still avoiding a request on every 30-second tick.
+    private static readonly TimeSpan InactiveFallbackCooldown = TimeSpan.FromMinutes(5);
     private readonly ClaudeStatusLineLimitsDataSource _statusLine;
     private readonly IForceRefreshableLimitsDataSource _direct;
     private readonly object _sync = new();
+    private readonly FileSystemWatcher? _snapshotWatcher;
+    private readonly EventWaitHandle? _updateSignal;
+    private readonly CancellationTokenSource _signalLifetime = new();
+    private readonly Task? _signalLoop;
     private DateTimeOffset? _lastDirectAttempt;
     private ProviderLimitsSnapshot? _lastDirectSnapshot;
 
@@ -199,9 +232,34 @@ public sealed class ClaudeHybridLimitsDataSource : IForceRefreshableLimitsDataSo
     {
         _statusLine = statusLine ?? new ClaudeStatusLineLimitsDataSource();
         _direct = direct ?? new ClaudeUsageLimitsDataSource();
+        var snapshotDirectory = System.IO.Path.GetDirectoryName(_statusLine.SnapshotPath);
+        if (!string.IsNullOrWhiteSpace(snapshotDirectory))
+        {
+            Directory.CreateDirectory(snapshotDirectory);
+            _snapshotWatcher = new FileSystemWatcher(snapshotDirectory, System.IO.Path.GetFileName(_statusLine.SnapshotPath))
+            {
+                NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
+                EnableRaisingEvents = true
+            };
+            _snapshotWatcher.Changed += SnapshotWatcher_Changed;
+            _snapshotWatcher.Created += SnapshotWatcher_Changed;
+            _snapshotWatcher.Renamed += SnapshotWatcher_Renamed;
+        }
+
+        try
+        {
+            _updateSignal = new EventWaitHandle(false, EventResetMode.AutoReset, ClaudeStatusLineUpdateSignal.EventName);
+            _signalLoop = Task.Run(WatchSignalAsync);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or WaitHandleCannotBeOpenedException)
+        {
+            WidgetLogger.Debug("Claude", "status_line_signal_listener_unavailable");
+        }
     }
 
     public LimitProviderId Provider => LimitProviderId.Claude;
+
+    public event EventHandler? UpdateAvailable;
 
     public async Task<ProviderLimitsSnapshot> GetSnapshotAsync(CancellationToken cancellationToken)
     {
@@ -238,6 +296,31 @@ public sealed class ClaudeHybridLimitsDataSource : IForceRefreshableLimitsDataSo
                 cancellationToken,
                 force: true)
             .ConfigureAwait(false);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _signalLifetime.Cancel();
+        if (_signalLoop is not null)
+        {
+            try
+            {
+                await _signalLoop.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
+
+        if (_snapshotWatcher is not null)
+        {
+            _snapshotWatcher.Changed -= SnapshotWatcher_Changed;
+            _snapshotWatcher.Created -= SnapshotWatcher_Changed;
+            _snapshotWatcher.Renamed -= SnapshotWatcher_Renamed;
+            _snapshotWatcher.Dispose();
+        }
+        _updateSignal?.Dispose();
+        _signalLifetime.Dispose();
     }
 
     private async Task<ProviderLimitsSnapshot> ReadDirectWithFallbackAsync(
@@ -311,6 +394,34 @@ public sealed class ClaudeHybridLimitsDataSource : IForceRefreshableLimitsDataSo
         lock (_sync)
         {
             _lastDirectAttempt = now;
+        }
+    }
+
+    private async Task WatchSignalAsync()
+    {
+        while (!_signalLifetime.IsCancellationRequested)
+        {
+            if (_updateSignal?.WaitOne(TimeSpan.FromMilliseconds(500)) == true)
+            {
+                RaiseUpdateAvailable();
+            }
+            await Task.Yield();
+        }
+    }
+
+    private void SnapshotWatcher_Changed(object sender, FileSystemEventArgs e) => RaiseUpdateAvailable();
+
+    private void SnapshotWatcher_Renamed(object sender, RenamedEventArgs e) => RaiseUpdateAvailable();
+
+    private void RaiseUpdateAvailable()
+    {
+        try
+        {
+            UpdateAvailable?.Invoke(this, EventArgs.Empty);
+        }
+        catch (Exception exception)
+        {
+            WidgetLogger.Error("Claude", "status_line_signal_subscriber_failed", exception);
         }
     }
 }

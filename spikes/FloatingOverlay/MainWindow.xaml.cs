@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Windows;
 using System.Windows.Input;
+using Microsoft.Win32;
 
 namespace LLMLimitsWidget.FloatingOverlay;
 
@@ -13,6 +14,9 @@ public partial class MainWindow : Window
     private readonly OverlayZOrderSupervisor _zOrderSupervisor;
     private readonly LimitsCoordinator _limitsCoordinator;
     private readonly bool _suppressPersistedGhost;
+    private static readonly System.Windows.Media.Brush CriticalCountdownBrush =
+        new System.Windows.Media.SolidColorBrush(
+            System.Windows.Media.Color.FromRgb(255, 183, 77));
     private const double MinimumScale = 0.6;
     private const double MaximumScale = 2.0;
     private const double ResizeHandleSize = 24;
@@ -46,12 +50,13 @@ public partial class MainWindow : Window
         _zOrderSupervisor.TopmostHealthChanged += ZOrderSupervisor_TopmostHealthChanged;
         _placementController.PlacementCommitted += PlacementController_PlacementCommitted;
         _limitsCoordinator = new LimitsCoordinator(
-                new ILimitsDataSource[]
+            new ILimitsDataSource[]
             {
-                new CodexAppServerLimitsDataSource(),
-                new ClaudeHybridLimitsDataSource()
+                new ProviderSupervisor(new CodexAppServerLimitsDataSource()),
+                new ProviderSupervisor(new ClaudeHybridLimitsDataSource())
             });
         _limitsCoordinator.SnapshotChanged += LimitsCoordinator_SnapshotChanged;
+        SystemEvents.PowerModeChanged += SystemEvents_PowerModeChanged;
         WidgetLogger.Info(
             "Wpf",
             "window_constructed",
@@ -588,9 +593,7 @@ public partial class MainWindow : Window
         var resetLabelReset = snapshot?.Provider == LimitProviderId.Claude
             ? second?.ResetAt
             : countdownReset;
-        var countdown = countdownReset is { } resetAt
-            ? $"◷ {resetAt.ToLocalTime():HH:mm}"
-            : "◷ —";
+        var countdown = CountdownFormatter.Format(countdownReset, DateTimeOffset.Now);
         var resetLabel = resetLabelReset is { } reset
             ? $"{reset.ToLocalTime():dd MMM} · {reset.ToLocalTime():HH:mm}"
             : "—";
@@ -615,6 +618,7 @@ public partial class MainWindow : Window
         row.MetricTwoPeriod = second?.Label ?? string.Empty;
         row.HasSecondMetric = second is not null;
         row.Countdown = countdown;
+        row.CountdownBrush = GetCountdownBrush(first?.ResetAt, row.Accent);
         row.ResetLabel = resetLabel;
         row.ToolTip = snapshot?.ErrorMessage is { Length: > 0 } error
             ? $"{snapshot.Status}: {error}"
@@ -626,6 +630,18 @@ public partial class MainWindow : Window
         return percent.HasValue
             ? $"{percent.Value:0.##}%"
             : "—";
+    }
+
+    private static System.Windows.Media.Brush GetCountdownBrush(
+        DateTimeOffset? resetAt,
+        System.Windows.Media.Brush providerAccent)
+    {
+        return CountdownFormatter.GetUrgency(resetAt, DateTimeOffset.Now) switch
+        {
+            CountdownUrgency.Critical => CriticalCountdownBrush,
+            CountdownUrgency.Near => providerAccent,
+            _ => System.Windows.Media.Brushes.White
+        };
     }
 
     private void SetOrientation(LayoutOrientation orientation)
@@ -730,6 +746,7 @@ public partial class MainWindow : Window
         _zOrderSupervisor.Dispose();
         _ghostModeController.Dispose();
         _limitsCoordinator.SnapshotChanged -= LimitsCoordinator_SnapshotChanged;
+        SystemEvents.PowerModeChanged -= SystemEvents_PowerModeChanged;
         _limitsCoordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 
@@ -761,6 +778,29 @@ public partial class MainWindow : Window
             _settings.Placement = placement;
         }
         WidgetSettingsStore.Save(_settings);
+    }
+
+    private async void SystemEvents_PowerModeChanged(object? sender, PowerModeChangedEventArgs e)
+    {
+        if (e.Mode != PowerModes.Resume || !_isLoaded)
+        {
+            return;
+        }
+
+        try
+        {
+            // Let network, named pipes and desktop CLIs settle after resume.
+            await Task.Delay(TimeSpan.FromMilliseconds(Random.Shared.Next(1_000, 5_001)));
+            if (_isLoaded)
+            {
+                WidgetLogger.Info("Limits", "refresh_requested_after_resume");
+                await _limitsCoordinator.RefreshAsync(force: true);
+            }
+        }
+        catch (Exception exception)
+        {
+            WidgetLogger.Warning("Limits", "resume_refresh_failed", exception);
+        }
     }
 
     private static T? FindVisualChild<T>(DependencyObject? parent)

@@ -43,7 +43,7 @@ The widget is now wired to real local adapters:
 
 Claude statusLine bridge is now implemented in `spikes/ClaudeStatusLineBridge`. It reads only stdin JSON, extracts `rate_limits`, and atomically writes a redacted snapshot to `%LOCALAPPDATA%\LLMLimitsWidget\claude-statusline-snapshot.json`. It never writes the prompt, transcript path, cwd, model, account, or credentials, and exits with code 0 even for malformed input so Claude's own statusLine is not broken.
 
-`ClaudeHybridLimitsDataSource` reads that snapshot first. A snapshot younger than three minutes is used immediately. If it is stale, direct `/usage` is allowed after a five-minute cooldown when a recent statusLine session is known, or after a fifteen-minute cooldown when no recent session is known. Manual refresh bypasses the cooldown and runs `/usage` once. If direct refresh fails, the last statusLine value remains visible as `Stale`.
+`ClaudeHybridLimitsDataSource` reads that snapshot first. A snapshot younger than three minutes is used immediately. If it is stale, direct `/usage` is allowed after a five-minute cooldown whether a recent statusLine session is known or not. This keeps the widget updating in the background when the user has not enabled Claude Code statusLine, while still avoiding a request on every 30-second coordinator tick. Manual refresh bypasses the cooldown and runs `/usage` once. If direct refresh fails, the last statusLine value remains visible as `Stale`.
 
 The bridge binary is intentionally not injected into the user's Claude settings automatically. This protects existing Claude configuration and makes activation explicit. After building Release, the statusLine command can be configured as:
 
