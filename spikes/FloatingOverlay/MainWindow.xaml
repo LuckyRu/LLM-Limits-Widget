@@ -76,7 +76,8 @@
                         <RowDefinition Height="1" />
                         <RowDefinition Height="47" />
                     </Grid.RowDefinitions>
-                    <local:ProviderRowControl Grid.Row="0"
+                    <local:ProviderRowControl x:Name="CodexVerticalRow"
+                                              Grid.Row="0"
                                               Provider="OpenAi"
                                               Accent="{StaticResource CodexBrush}"
                                               MetricOneValue="62"
@@ -85,7 +86,8 @@
                                               Countdown="◷ 07:03"
                                               ResetLabel="18 Aug · reset" />
                     <Border Grid.Row="1" Background="{StaticResource DividerBrush}" />
-                    <local:ProviderRowControl Grid.Row="2"
+                    <local:ProviderRowControl x:Name="ClaudeVerticalRow"
+                                              Grid.Row="2"
                                               Provider="Claude"
                                               Accent="{StaticResource ClaudeBrush}"
                                               MetricOneValue="5"
@@ -105,7 +107,8 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <local:ProviderRowControl Grid.Column="0"
+                    <local:ProviderRowControl x:Name="CodexHorizontalRow"
+                                              Grid.Column="0"
                                               Compact="True"
                                               Provider="OpenAi"
                                               Accent="{StaticResource CodexBrush}"
@@ -120,7 +123,8 @@
                             Margin="8,0"
                             VerticalAlignment="Center"
                             Background="{StaticResource DividerBrush}" />
-                    <local:ProviderRowControl Grid.Column="2"
+                    <local:ProviderRowControl x:Name="ClaudeHorizontalRow"
+                                              Grid.Column="2"
                                               Compact="True"
                                               Provider="Claude"
                                               Accent="{StaticResource ClaudeBrush}"

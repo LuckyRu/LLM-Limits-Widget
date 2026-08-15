@@ -11,6 +11,7 @@ public partial class MainWindow : Window
     private readonly WindowPlacementController _placementController;
     private readonly GhostModeController _ghostModeController;
     private readonly OverlayZOrderSupervisor _zOrderSupervisor;
+    private readonly LimitsCoordinator _limitsCoordinator;
     private readonly bool _suppressPersistedGhost;
     private const double MinimumScale = 0.6;
     private const double MaximumScale = 2.0;
@@ -44,6 +45,13 @@ public partial class MainWindow : Window
         _zOrderSupervisor = new OverlayZOrderSupervisor(_placementController, Dispatcher);
         _zOrderSupervisor.TopmostHealthChanged += ZOrderSupervisor_TopmostHealthChanged;
         _placementController.PlacementCommitted += PlacementController_PlacementCommitted;
+        _limitsCoordinator = new LimitsCoordinator(
+                new ILimitsDataSource[]
+            {
+                new CodexAppServerLimitsDataSource(),
+                new ClaudeUsageLimitsDataSource()
+            });
+        _limitsCoordinator.SnapshotChanged += LimitsCoordinator_SnapshotChanged;
     }
 
     private void Window_Loaded(object sender, RoutedEventArgs e)
@@ -71,6 +79,7 @@ public partial class MainWindow : Window
             LastGhostModeResult = ApplyGhostModeTransition(true);
         }
         PersistSettings();
+        _limitsCoordinator.Start();
     }
 
     private void Window_IsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
@@ -193,7 +202,7 @@ public partial class MainWindow : Window
 
     private void RefreshButton_Click(object sender, RoutedEventArgs e)
     {
-        RefreshSample();
+        _ = RefreshLimitsAsync();
     }
 
     private void ScaleMenuItem_Click(object sender, RoutedEventArgs e)
@@ -212,7 +221,7 @@ public partial class MainWindow : Window
 
     private void RefreshMenuItem_Click(object sender, RoutedEventArgs e)
     {
-        RefreshSample();
+        _ = RefreshLimitsAsync();
     }
 
     private void SurfaceOpacitySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -432,10 +441,97 @@ public partial class MainWindow : Window
         PersistSettings();
     }
 
-    private void RefreshSample()
+    private async Task RefreshLimitsAsync()
     {
-        // Provider adapters will replace the mock values after the visual spike.
-        ToolTip = $"Mock refreshed {DateTime.Now:HH:mm:ss}";
+        try
+        {
+            await _limitsCoordinator.RefreshAsync();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private void LimitsCoordinator_SnapshotChanged(LimitsSnapshot snapshot)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.InvokeAsync(() => ApplyLimitsSnapshot(snapshot));
+            return;
+        }
+
+        ApplyLimitsSnapshot(snapshot);
+    }
+
+    private void ApplyLimitsSnapshot(LimitsSnapshot snapshot)
+    {
+        ApplyProviderSnapshot(
+            snapshot.TryGetProvider(LimitProviderId.Codex, out var codex) ? codex : null,
+            CodexVerticalRow,
+            CodexHorizontalRow);
+        ApplyProviderSnapshot(
+            snapshot.TryGetProvider(LimitProviderId.Claude, out var claude) ? claude : null,
+            ClaudeVerticalRow,
+            ClaudeHorizontalRow);
+        ToolTip = $"Лимиты обновлены: {snapshot.UpdatedAt.ToLocalTime():HH:mm:ss}";
+    }
+
+    private static void ApplyProviderSnapshot(
+        ProviderLimitsSnapshot? snapshot,
+        ProviderRowControl verticalRow,
+        ProviderRowControl horizontalRow)
+    {
+        var windows = snapshot?.Windows ?? Array.Empty<LimitWindowSnapshot>();
+        var first = snapshot?.Provider == LimitProviderId.Claude
+            ? windows.FirstOrDefault(window => window.Kind == LimitWindowKind.FiveHour)
+                ?? windows.ElementAtOrDefault(0)
+            : windows.FirstOrDefault(window => window.Kind == LimitWindowKind.Weekly)
+                ?? windows.ElementAtOrDefault(0);
+        var second = snapshot?.Provider == LimitProviderId.Claude
+            ? windows.FirstOrDefault(window => window.Kind == LimitWindowKind.SevenDay)
+            : null;
+        var nearestReset = windows
+            .Where(window => window.ResetAt.HasValue)
+            .OrderBy(window => window.ResetAt)
+            .FirstOrDefault();
+        var countdown = nearestReset?.ResetAt is { } resetAt
+            ? $"◷ {resetAt.ToLocalTime():HH:mm}"
+            : "◷ —";
+        var resetLabel = nearestReset?.ResetAt is { } reset
+            ? $"{reset.ToLocalTime():dd MMM} · reset"
+            : "reset unavailable";
+
+        ApplyMetric(verticalRow, first, second, countdown, resetLabel, snapshot);
+        ApplyMetric(horizontalRow, first, second, countdown, resetLabel, snapshot);
+    }
+
+    private static void ApplyMetric(
+        ProviderRowControl row,
+        LimitWindowSnapshot? first,
+        LimitWindowSnapshot? second,
+        string countdown,
+        string resetLabel,
+        ProviderLimitsSnapshot? snapshot)
+    {
+        row.MetricOneValue = first?.SafeRemainingPercent ?? 0;
+        row.MetricOnePercent = FormatPercent(first?.SafeRemainingPercent);
+        row.MetricOnePeriod = first?.Label ?? "—";
+        row.MetricTwoValue = second?.SafeRemainingPercent ?? 0;
+        row.MetricTwoPercent = FormatPercent(second?.SafeRemainingPercent);
+        row.MetricTwoPeriod = second?.Label ?? string.Empty;
+        row.HasSecondMetric = second is not null;
+        row.Countdown = countdown;
+        row.ResetLabel = resetLabel;
+        row.ToolTip = snapshot?.ErrorMessage is { Length: > 0 } error
+            ? $"{snapshot.Status}: {error}"
+            : snapshot?.Status.ToString() ?? LimitDataStatus.Unavailable.ToString();
+    }
+
+    private static string FormatPercent(double? percent)
+    {
+        return percent.HasValue
+            ? $"{percent.Value:0.##}%"
+            : "—";
     }
 
     private void SetOrientation(LayoutOrientation orientation)
@@ -538,6 +634,8 @@ public partial class MainWindow : Window
         _zOrderSupervisor.TopmostHealthChanged -= ZOrderSupervisor_TopmostHealthChanged;
         _zOrderSupervisor.Dispose();
         _ghostModeController.Dispose();
+        _limitsCoordinator.SnapshotChanged -= LimitsCoordinator_SnapshotChanged;
+        _limitsCoordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 
     private void Window_Closed(object? sender, EventArgs e)

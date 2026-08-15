@@ -13,6 +13,7 @@
 
 - [FloatingOverlay implementation](technical/floating-overlay-implementation-2026-08-13.md) — архитектура WPF overlay, native placement controller, защита границ монитора, taskbar overlap, persistence, DPI и тестирование.
 - [Ghost mode system design](technical/ghost-mode-system-design-2026-08-13.md) — полностью видимый click-through режим без mouse/keyboard interaction, shell-topmost поверх taskbar/system tray, управление через tray, persistence, recovery и тестовая матрица.
+- [Limits domain and widget data flow](technical/limits-domain-and-widget-data-flow-2026-08-15.md) — provider-neutral модели, coordinator, обновление обеих раскладок, stale/unavailable semantics и lifecycle.
 
 ## Правила ведения
 
