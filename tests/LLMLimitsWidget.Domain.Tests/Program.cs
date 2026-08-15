@@ -164,6 +164,31 @@ var staleStatusMerge = ObservationMergePolicy.TryMerge(
     now);
 AssertEqual(65m, staleStatusMerge.Value!.Windows[LimitPeriod.FiveHours].Remaining.Value, "T-009 old statusLine cannot overwrite direct");
 
+var pushed = AppReducer.Reduce(
+    AppState.Empty,
+    new ObservationReceivedCommand(ProviderId.Claude, statusObservation, now, Guid.NewGuid()));
+AssertEqual(
+    70m,
+    pushed.State.Providers[ProviderId.Claude].LastKnownGood!.Windows[LimitPeriod.FiveHours].Remaining.Value,
+    "T-003 statusLine push enters the single-writer store");
+var invalidPush = statusObservation with
+{
+    Windows = ImmutableDictionary<LimitPeriod, LimitWindowCandidate>.Empty.Add(
+        LimitPeriod.FiveHours,
+        statusCandidate with { ResetAtUtc = now.AddHours(-2) })
+};
+var rejectedPush = AppReducer.Reduce(
+    pushed.State,
+    new ObservationReceivedCommand(ProviderId.Claude, invalidPush, now, Guid.NewGuid()));
+AssertEqual(
+    TransportHealth.Degraded,
+    rejectedPush.State.Providers[ProviderId.Claude].Transports[TransportId.ClaudeStatusLine].Health,
+    "T-001 invalid statusLine only degrades statusLine transport");
+AssertEqual(
+    TransportHealth.Unknown,
+    rejectedPush.State.Providers[ProviderId.Claude].Transports[TransportId.ClaudeDirectCli].Health,
+    "T-001 invalid statusLine leaves direct transport isolated");
+
 var late = AppReducer.Reduce(
     completed.State,
     new AttemptCompletedCommand(
@@ -189,7 +214,7 @@ if (failures.Count > 0)
     return 1;
 }
 
-Console.WriteLine("Domain M1/M5: all cases passed.");
+Console.WriteLine("Domain M1/M5/M6: all cases passed.");
 return 0;
 
 void Assert(bool condition, string name)

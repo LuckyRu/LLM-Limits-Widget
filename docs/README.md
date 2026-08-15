@@ -21,6 +21,7 @@
 - [Architecture v2: M3 Codex implementation](technical/architecture-v2-m3-implementation-2026-08-15.md) — новый pure Codex parser и mapping в domain observation envelope.
 - [Architecture v2: M4 Claude implementation](technical/architecture-v2-m4-implementation-2026-08-15.md) — statusLine/direct `/usage` parsers, typed transport errors и mapping в domain observation envelope.
 - [Architecture v2: M5 observation merge](technical/architecture-v2-m5-implementation-2026-08-15.md) — ordering, source revision, per-window partial merge и Claude tie-breaker.
+- [Architecture v2: M6 push ingress](technical/architecture-v2-m6-implementation-2026-08-15.md) — statusLine observation command, single-writer publication и transport isolation.
 
 ## Правила ведения
 

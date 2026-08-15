@@ -17,6 +17,7 @@ public static class AppReducer
             WakeElapsedCommand wake => WakeElapsed(state, wake),
             RuntimeStoppedCommand stopped => RuntimeStopped(state, stopped),
             AttemptCompletedCommand completed => AttemptCompleted(state, completed),
+            ObservationReceivedCommand received => ObservationReceived(state, received),
             _ => NoChange(state)
         };
     }
@@ -388,6 +389,64 @@ public static class AppReducer
             [new SaveProviderCacheEffect(EffectId.New(), command.Provider, accepted)],
             command.CorrelationId,
             "provider_observation_accepted");
+    }
+
+    private static DomainTransition ObservationReceived(
+        AppState state,
+        ObservationReceivedCommand command)
+    {
+        if (!state.Providers.TryGetValue(command.Provider, out var provider)
+            || command.Observation.Provider != command.Provider
+            || !provider.Transports.ContainsKey(command.Observation.Transport))
+        {
+            return NoChange(state);
+        }
+
+        var merged = ObservationMergePolicy.TryMerge(provider, command.Observation, command.NowUtc);
+        if (!merged.IsSuccess)
+        {
+            var failedTransport = provider.Transports[command.Observation.Transport] with
+            {
+                Health = TransportHealth.Degraded,
+                LastError = merged.Error,
+                ConsecutiveFailures = provider.Transports[command.Observation.Transport].ConsecutiveFailures + 1,
+                LastAttemptAtUtc = command.NowUtc
+            };
+            var failed = provider with
+            {
+                Transports = provider.Transports.SetItem(command.Observation.Transport, failedTransport)
+            };
+            return ReplaceProvider(
+                state,
+                command.Provider,
+                failed,
+                [],
+                command.CorrelationId,
+                "provider_observation_rejected");
+        }
+
+        var healthyTransport = provider.Transports[command.Observation.Transport] with
+        {
+            Health = TransportHealth.Healthy,
+            LastError = null,
+            ConsecutiveFailures = 0,
+            LastSuccessAtUtc = command.NowUtc
+        };
+        var updated = provider with
+        {
+            LastKnownGood = merged.Value,
+            Freshness = DataFreshness.Fresh,
+            AggregateHealth = ProviderHealth.Healthy,
+            Transports = provider.Transports.SetItem(command.Observation.Transport, healthyTransport),
+            LastSuccessAtUtc = command.NowUtc
+        };
+        return ReplaceProvider(
+            state,
+            command.Provider,
+            updated,
+            [new SaveProviderCacheEffect(EffectId.New(), command.Provider, merged.Value!)],
+            command.CorrelationId,
+            "provider_push_observation_accepted");
     }
 
     private static AttemptContext CreateAttempt(

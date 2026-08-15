@@ -79,6 +79,13 @@ public sealed record AttemptCompletedCommand(
     Guid CorrelationId)
     : DomainCommand(NowUtc, CorrelationId);
 
+public sealed record ObservationReceivedCommand(
+    ProviderId Provider,
+    ProviderObservationEnvelope Observation,
+    DateTimeOffset NowUtc,
+    Guid CorrelationId)
+    : DomainCommand(NowUtc, CorrelationId);
+
 public abstract record DomainEffect(EffectId Id, ProviderId Provider);
 
 public sealed record StartRuntimeEffect(EffectId Id, ProviderId Provider)
