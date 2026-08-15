@@ -5,6 +5,28 @@ using LLMLimitsWidget.Infrastructure.Windows;
 
 var failures = new List<string>();
 var now = new DateTimeOffset(2026, 8, 15, 12, 0, 0, TimeSpan.Zero);
+
+var previousCodexPath = Environment.GetEnvironmentVariable("CODEX_CLI_PATH");
+var previousClaudePath = Environment.GetEnvironmentVariable("CLAUDE_CODE_PATH");
+try
+{
+    Environment.SetEnvironmentVariable("CODEX_CLI_PATH", "C:\\diagnostics\\codex.exe");
+    Environment.SetEnvironmentVariable("CLAUDE_CODE_PATH", "C:\\diagnostics\\claude.exe");
+    AssertEqual(
+        "C:\\diagnostics\\codex.exe",
+        ProviderExecutableLocator.ResolveCodex(),
+        "I-000 Codex locator honors explicit path");
+    AssertEqual(
+        "C:\\diagnostics\\claude.exe",
+        ProviderExecutableLocator.ResolveClaude(),
+        "I-000 Claude locator honors explicit path");
+}
+finally
+{
+    Environment.SetEnvironmentVariable("CODEX_CLI_PATH", previousCodexPath);
+    Environment.SetEnvironmentVariable("CLAUDE_CODE_PATH", previousClaudePath);
+}
+
 var runner = new ScriptedRunner(new HiddenProcessResult(
     0,
     "{\"is_error\":false,\"result\":\"Current session: 27.25% used · resets Aug 15, 7:59am (UTC)\\nCurrent week (all models): 47.5% used · resets Aug 17, 4:59pm (UTC)\"}",

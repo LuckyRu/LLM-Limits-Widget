@@ -33,13 +33,13 @@ public sealed class ArchitectureV2CompositionRoot : IAsyncDisposable
         var deferredEffects = new DeferredEffectExecutor();
         _store = new AppStore(deferredEffects);
         var runner = new WindowsHiddenProcessRunner();
-        var codexSession = new CodexAppServerSession(ResolveCodexPath(), _clock);
+        var codexSession = new CodexAppServerSession(ProviderExecutableLocator.ResolveCodex(), _clock);
         _codexRuntime = new ProviderPipelineRuntime(
             new CodexAppServerTransport(codexSession, _clock),
             _store,
             _clock);
         _claudeRuntime = new ProviderPipelineRuntime(
-            new ClaudeDirectCliTransport(ResolveClaudePath(), runner, _clock),
+            new ClaudeDirectCliTransport(ProviderExecutableLocator.ResolveClaude(), runner, _clock),
             _store,
             _clock);
         _effects = new ProviderEffectExecutor([_codexRuntime, _claudeRuntime]);
@@ -113,6 +113,22 @@ public sealed class ArchitectureV2CompositionRoot : IAsyncDisposable
 
     private void Store_StateChanged(AppState state, DomainTransition transition)
     {
+        var codex = state.Providers[ProviderId.Codex];
+        var claude = state.Providers[ProviderId.Claude];
+        WidgetLogger.Debug(
+            "ArchitectureV2",
+            "state_changed",
+            ("revision", state.Revision),
+            ("transition", transition.Events.OfType<StateTransitionEvent>().FirstOrDefault()?.Name ?? "unknown"),
+            ("codexFreshness", codex.Freshness),
+            ("codexHealth", codex.AggregateHealth),
+            ("codexWindows", codex.LastKnownGood?.Windows.Count ?? 0),
+            ("claudeFreshness", claude.Freshness),
+            ("claudeHealth", claude.AggregateHealth),
+            ("claudeWindows", claude.LastKnownGood?.Windows.Count ?? 0),
+            ("codexTransportError", codex.Transports.Values.Select(transport => transport.LastError?.Code.ToString()).FirstOrDefault(value => value is not null) ?? string.Empty),
+            ("claudeTransportError", claude.Transports.Values.Select(transport => transport.LastError?.Code.ToString()).FirstOrDefault(value => value is not null) ?? string.Empty));
+
         void Apply()
         {
             ViewModel.Apply(state, _clock.GetUtcNow());
@@ -127,12 +143,6 @@ public sealed class ArchitectureV2CompositionRoot : IAsyncDisposable
             _ = _dispatcher.InvokeAsync(Apply);
         }
     }
-
-    private static string ResolveCodexPath() =>
-        Environment.GetEnvironmentVariable("CODEX_CLI_PATH") ?? "codex.exe";
-
-    private static string ResolveClaudePath() =>
-        Environment.GetEnvironmentVariable("CLAUDE_CODE_PATH") ?? "claude.exe";
 
     private static string ResolveStatusLinePath() =>
         Environment.GetEnvironmentVariable("LLM_LIMITS_CLAUDE_SNAPSHOT")

@@ -28,6 +28,7 @@
 - [Architecture v2: M10 WPF composition](technical/architecture-v2-m10-implementation-2026-08-15.md) — feature-flagged composition root, Dispatcher bridge и lifecycle wiring.
 - [Architecture v2: M11 WPF ViewModel cutover](technical/architecture-v2-m11-implementation-2026-08-15.md) — rows из нового VM, manual refresh через Store и оптимизированный countdown render.
 - [Architecture v2: M12 real smoke](technical/architecture-v2-m12-smoke-2026-08-15.md) — фактический запуск `--arch-v2`, mutex isolation и clean shutdown.
+- [Architecture v2: M13 provider locator](technical/architecture-v2-m13-provider-locator-2026-08-15.md) — исправление поиска packaged Claude CLI и повторный реальный smoke обоих провайдеров.
 
 ## Правила ведения
 
