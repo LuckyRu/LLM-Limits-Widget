@@ -3,6 +3,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
+using LLMLimitsWidget.Infrastructure.Windows;
 using FormsContextMenuStrip = System.Windows.Forms.ContextMenuStrip;
 using FormsNotifyIcon = System.Windows.Forms.NotifyIcon;
 using FormsToolStripMenuItem = System.Windows.Forms.ToolStripMenuItem;
@@ -16,6 +17,7 @@ public partial class App : System.Windows.Application
     private Icon? _trayIconAsset;
     private Stream? _trayIconStream;
     private FormsToolStripMenuItem? _ghostModeMenuItem;
+    private FormsToolStripMenuItem? _claudeFastUpdatesMenuItem;
     private Mutex? _singleInstanceMutex;
     private bool _singleInstanceMutexOwned;
     private IntPtr _foregroundBeforeTray;
@@ -118,6 +120,9 @@ public partial class App : System.Windows.Application
                 _foregroundBeforeTray = IntPtr.Zero;
             };
             _trayMenu.Items.Add(_ghostModeMenuItem);
+            _claudeFastUpdatesMenuItem = new FormsToolStripMenuItem("Claude: восстановить быстрые обновления");
+            _claudeFastUpdatesMenuItem.Click += (_, _) => ConfigureClaudeFastUpdates();
+            _trayMenu.Items.Add(_claudeFastUpdatesMenuItem);
             _trayMenu.Items.Add(new FormsToolStripMenuItem("Показать виджет", null, (_, _) => ShowWidget()));
             _trayMenu.Items.Add(new FormsToolStripMenuItem("Сбросить позицию", null, (_, _) => ResetWidgetPosition()));
             _trayMenu.Items.Add(new FormsToolStripMenuItem("Выйти", null, (_, _) => ExitApplication()));
@@ -232,6 +237,28 @@ public partial class App : System.Windows.Application
             _architectureV2 = null;
             _architectureV2StartTask = null;
         }
+    }
+
+    private void ConfigureClaudeFastUpdates()
+    {
+        if (_architectureV2 is null)
+        {
+            return;
+        }
+
+        var result = _architectureV2.ConfigureClaudeStatusLine();
+        WidgetLogger.Info("ClaudeStatusLine", "configuration_requested_from_tray", ("state", result.State));
+        _trayIcon?.ShowBalloonTip(
+            3_000,
+            "Claude fast updates",
+            result.State switch
+            {
+                ClaudeStatusLineConfigurationState.Configured => "Enabled. Use Claude Code once or restart it to activate.",
+                ClaudeStatusLineConfigurationState.AlreadyConfigured => "Already enabled.",
+                ClaudeStatusLineConfigurationState.ExistingUserStatusLine => "Your existing Claude status line was kept unchanged.",
+                _ => "Could not configure. Open widget logs for details."
+            },
+            System.Windows.Forms.ToolTipIcon.Info);
     }
 
     private bool TryAcquireSingleInstance()

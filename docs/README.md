@@ -31,6 +31,7 @@
 - [Architecture v2: M13 provider locator](technical/architecture-v2-m13-provider-locator-2026-08-15.md) — исправление поиска packaged Claude CLI и повторный реальный smoke обоих провайдеров.
 - [Architecture v2: M14 default cutover](technical/architecture-v2-m14-default-cutover-2026-08-15.md) — v2 включен по умолчанию, legacy оставлен через `--legacy` и rollback environment overrides.
 - [Architecture v2: M15 reliability fixes](technical/architecture-v2-m15-reliability-fixes-2026-08-15.md) — periodic refresh, cache v2, retry/freshness recovery, statusLine self-healing, countdown scheduling и общий mutex.
+- [Architecture v2: M16 Claude statusLine provisioning](technical/architecture-v2-m16-claude-statusline-provisioning-2026-08-15.md) — deployable bridge, safe user-settings merge, named-signal delivery и direct fallback.
 
 ## Правила ведения
 

@@ -23,6 +23,7 @@ public sealed class ArchitectureV2CompositionRoot : IAsyncDisposable
     private readonly ProviderPipelineRuntime _claudeRuntime;
     private readonly ClaudeStatusLineSignalPump _statusLinePump;
     private readonly IProviderCache _cache;
+    private readonly ClaudeStatusLineConfigurator _statusLineConfigurator;
     private bool _started;
 
     private ArchitectureV2CompositionRoot(Dispatcher dispatcher)
@@ -44,6 +45,7 @@ public sealed class ArchitectureV2CompositionRoot : IAsyncDisposable
             _store,
             _clock);
         _cache = new JsonProviderCache();
+        _statusLineConfigurator = new ClaudeStatusLineConfigurator();
         _effects = new ProviderEffectExecutor([_codexRuntime, _claudeRuntime], _store, _cache);
         deferredEffects.Set(_effects);
         _statusLinePump = new ClaudeStatusLineSignalPump(
@@ -91,6 +93,7 @@ public sealed class ArchitectureV2CompositionRoot : IAsyncDisposable
         _started = true;
         _store.Start(_lifetime.Token);
         await RestoreCacheAsync().ConfigureAwait(false);
+        ConfigureClaudeStatusLine();
         await _codexRuntime.StartAsync(_lifetime.Token).ConfigureAwait(false);
         await _claudeRuntime.StartAsync(_lifetime.Token).ConfigureAwait(false);
         _statusLinePump.Start(_lifetime.Token);
@@ -111,6 +114,17 @@ public sealed class ArchitectureV2CompositionRoot : IAsyncDisposable
                     Guid.NewGuid()),
                 priority: true).ConfigureAwait(false);
         }
+    }
+
+    public ClaudeStatusLineConfigurationResult ConfigureClaudeStatusLine()
+    {
+        var result = _statusLineConfigurator.EnsureConfigured(ResolveBridgeExecutablePath());
+        WidgetLogger.Info(
+            "ClaudeStatusLine",
+            "configuration_checked",
+            ("state", result.State),
+            ("settingsPath", result.SettingsPath));
+        return result;
     }
 
     public async ValueTask DisposeAsync()
@@ -181,6 +195,13 @@ public sealed class ArchitectureV2CompositionRoot : IAsyncDisposable
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "LLMLimitsWidget",
             "claude-statusline-snapshot.json");
+
+    private static string ResolveBridgeExecutablePath() =>
+        Environment.GetEnvironmentVariable("LLM_LIMITS_CLAUDE_STATUSLINE_BRIDGE_PATH")
+        ?? Path.Combine(
+            AppContext.BaseDirectory,
+            "claude-statusline-bridge",
+            "LLMLimitsWidget.ClaudeStatusLineBridge.exe");
 
     private async Task RestoreCacheAsync()
     {

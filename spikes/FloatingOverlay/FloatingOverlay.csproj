@@ -18,4 +18,15 @@
     <ProjectReference Include="..\..\src\LLMLimitsWidget.Infrastructure.Windows\LLMLimitsWidget.Infrastructure.Windows.csproj" />
     <ProjectReference Include="..\..\src\LLMLimitsWidget.Presentation\LLMLimitsWidget.Presentation.csproj" />
   </ItemGroup>
+  <Target Name="BuildClaudeStatusLineBridge" AfterTargets="Build">
+    <MSBuild Projects="$(MSBuildProjectDirectory)\..\..\src\LLMLimitsWidget.ClaudeStatusLineBridge\LLMLimitsWidget.ClaudeStatusLineBridge.csproj"
+             Targets="Build"
+             Properties="Configuration=$(Configuration);UseSharedCompilation=$(UseSharedCompilation)" />
+    <ItemGroup>
+      <ClaudeStatusLineBridgeFiles Include="$(MSBuildProjectDirectory)\..\..\src\LLMLimitsWidget.ClaudeStatusLineBridge\bin\$(Configuration)\net10.0-windows\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ClaudeStatusLineBridgeFiles)"
+          DestinationFiles="@(ClaudeStatusLineBridgeFiles->'$(OutDir)claude-statusline-bridge\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
 </Project>

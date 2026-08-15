@@ -60,6 +60,42 @@ finally
     }
 }
 
+var configurationDirectory = Path.Combine(Path.GetTempPath(), $"llm-limits-claude-config-{Guid.NewGuid():N}");
+try
+{
+    Directory.CreateDirectory(configurationDirectory);
+    var settingsPath = Path.Combine(configurationDirectory, "settings.json");
+    var bridgePath = Path.Combine(configurationDirectory, "LLMLimitsWidget.ClaudeStatusLineBridge.exe");
+    await File.WriteAllTextAsync(bridgePath, string.Empty);
+    await File.WriteAllTextAsync(settingsPath, "{\"theme\":\"dark\"}");
+    var configurator = new ClaudeStatusLineConfigurator(settingsPath);
+    var configured = configurator.EnsureConfigured(bridgePath);
+    AssertEqual(ClaudeStatusLineConfigurationState.Configured, configured.State, "I-000 configures an empty statusLine safely");
+    var settingsText = await File.ReadAllTextAsync(settingsPath);
+    Assert(settingsText.Contains("LLMLimitsWidget.ClaudeStatusLineBridge.exe", StringComparison.Ordinal), "I-000 stores only the bridge command");
+    Assert(settingsText.Contains("\"theme\": \"dark\"", StringComparison.Ordinal), "I-000 preserves unrelated Claude settings");
+    Assert(File.Exists(Path.Combine(configurationDirectory, "settings.llm-limits-widget.backup.json")), "I-000 keeps a rollback backup");
+    AssertEqual(ClaudeStatusLineConfigurationState.AlreadyConfigured, configurator.EnsureConfigured(bridgePath).State, "I-000 setup is idempotent");
+
+    await File.WriteAllTextAsync(settingsPath, "{\"statusLine\":{\"type\":\"command\",\"command\":\"my-statusline.ps1\"}}");
+    AssertEqual(
+        ClaudeStatusLineConfigurationState.ExistingUserStatusLine,
+        configurator.EnsureConfigured(bridgePath).State,
+        "I-000 leaves another user statusLine untouched");
+
+    await File.WriteAllTextAsync(settingsPath, "{\"statusLine\":{\"type\":\"command\",\"command\":42}}");
+    AssertEqual(
+        ClaudeStatusLineConfigurationState.ExistingUserStatusLine,
+        configurator.EnsureConfigured(bridgePath).State,
+        "I-000 malformed user command remains protected");
+}
+finally
+{
+    if (Directory.Exists(configurationDirectory))
+    {
+        Directory.Delete(configurationDirectory, recursive: true);
+    }
+}
 var runner = new ScriptedRunner(new HiddenProcessResult(
     0,
     "{\"is_error\":false,\"result\":\"Current session: 27.25% used · resets Aug 15, 7:59am (UTC)\\nCurrent week (all models): 47.5% used · resets Aug 17, 4:59pm (UTC)\"}",

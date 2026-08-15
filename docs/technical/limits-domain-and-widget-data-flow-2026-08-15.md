@@ -45,14 +45,13 @@ Claude statusLine bridge is now implemented in `spikes/ClaudeStatusLineBridge`. 
 
 `ClaudeHybridLimitsDataSource` reads that snapshot first. A snapshot younger than three minutes is used immediately. If it is stale, direct `/usage` is allowed after a five-minute cooldown whether a recent statusLine session is known or not. This keeps the widget updating in the background when the user has not enabled Claude Code statusLine, while still avoiding a request on every 30-second coordinator tick. Manual refresh bypasses the cooldown and runs `/usage` once. If direct refresh fails, the last statusLine value remains visible as `Stale`.
 
-The bridge binary is intentionally not injected into the user's Claude settings automatically. This protects existing Claude configuration and makes activation explicit. After building Release, the statusLine command can be configured as:
+Architecture v2 provisions the bridge only when the user-level `statusLine` is absent or already managed by this widget. A different user-owned command is never overwritten; direct `/usage` remains available in that case. The widget makes a backup before its atomic settings update. The resulting command is:
 
 ```json
 {
   "statusLine": {
     "type": "command",
-    "command": "powershell -NoProfile -Command \"& 'D:/prg/LLMLimitsWidget/spikes/ClaudeStatusLineBridge/bin/Release/net10.0-windows/LLMLimitsWidget.ClaudeStatusLineBridge.exe'\"",
-    "refreshInterval": 60
+    "command": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"& '<widget directory>/claude-statusline-bridge/LLMLimitsWidget.ClaudeStatusLineBridge.exe'\""
   }
 }
 ```

@@ -12,6 +12,7 @@ public sealed class ClaudeStatusLineSignalPump : IAsyncDisposable
 {
     private static readonly TimeSpan Debounce = TimeSpan.FromMilliseconds(100);
     private static readonly TimeSpan RecoveryDelay = TimeSpan.FromMinutes(1);
+    private const string UpdateSignalName = "Local\\LLMLimitsWidget.ClaudeStatusLineUpdated";
     private readonly string _snapshotPath;
     private readonly ClaudeStatusLineFileReader _reader;
     private readonly IApplicationCommandSink _commands;
@@ -26,7 +27,9 @@ public sealed class ClaudeStatusLineSignalPump : IAsyncDisposable
     private readonly object _sync = new();
     private CancellationTokenSource? _lifetime;
     private FileSystemWatcher? _watcher;
+    private EventWaitHandle? _updateSignal;
     private Task? _loop;
+    private Task? _signalLoop;
     private long _sequence;
 
     public ClaudeStatusLineSignalPump(
@@ -53,6 +56,7 @@ public sealed class ClaudeStatusLineSignalPump : IAsyncDisposable
             EnsureWatcher();
 
             _loop = RunAsync(_lifetime.Token);
+            _signalLoop = WatchNamedSignalAsync(_lifetime.Token);
             _signals.Writer.TryWrite(true);
         }
     }
@@ -61,15 +65,20 @@ public sealed class ClaudeStatusLineSignalPump : IAsyncDisposable
     {
         CancellationTokenSource? lifetime;
         Task? loop;
+        Task? signalLoop;
         lock (_sync)
         {
             lifetime = _lifetime;
             loop = _loop;
+            signalLoop = _signalLoop;
             _lifetime = null;
             _loop = null;
+            _signalLoop = null;
             _signals.Writer.TryComplete();
             _watcher?.Dispose();
             _watcher = null;
+            _updateSignal?.Dispose();
+            _updateSignal = null;
         }
 
         if (lifetime is null)
@@ -83,6 +92,17 @@ public sealed class ClaudeStatusLineSignalPump : IAsyncDisposable
             try
             {
                 await loop.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+            {
+            }
+        }
+
+        if (signalLoop is not null)
+        {
+            try
+            {
+                await signalLoop.ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
             {
@@ -157,6 +177,47 @@ public sealed class ClaudeStatusLineSignalPump : IAsyncDisposable
         }
     }
 
+    private async Task WatchNamedSignalAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            lock (_sync)
+            {
+                _updateSignal ??= new EventWaitHandle(
+                    false,
+                    EventResetMode.AutoReset,
+                    UpdateSignalName);
+            }
+
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                EventWaitHandle? signal;
+                lock (_sync)
+                {
+                    signal = _updateSignal;
+                }
+
+                if (signal?.WaitOne(TimeSpan.FromMilliseconds(500)) == true)
+                {
+                    _signals.Writer.TryWrite(true);
+                }
+
+                await Task.Yield();
+            }
+        }
+        catch (ObjectDisposedException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // The file watcher and scheduled reconciliation remain available.
+        }
+        catch (WaitHandleCannotBeOpenedException)
+        {
+            // The bridge creates the signal lazily; polling remains available.
+        }
+    }
+
     private void EnsureWatcher()
     {
         lock (_sync)
@@ -167,7 +228,20 @@ public sealed class ClaudeStatusLineSignalPump : IAsyncDisposable
             }
 
             var directory = Path.GetDirectoryName(_snapshotPath);
-            if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+            if (string.IsNullOrWhiteSpace(directory))
+            {
+                return;
+            }
+
+            try
+            {
+                Directory.CreateDirectory(directory);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return;
+            }
+            catch (IOException)
             {
                 return;
             }
