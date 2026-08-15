@@ -14,5 +14,8 @@
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="Assets\llm-limits-tray.ico" />
+    <ProjectReference Include="..\..\src\LLMLimitsWidget.Application\LLMLimitsWidget.Application.csproj" />
+    <ProjectReference Include="..\..\src\LLMLimitsWidget.Infrastructure.Windows\LLMLimitsWidget.Infrastructure.Windows.csproj" />
+    <ProjectReference Include="..\..\src\LLMLimitsWidget.Presentation\LLMLimitsWidget.Presentation.csproj" />
   </ItemGroup>
 </Project>

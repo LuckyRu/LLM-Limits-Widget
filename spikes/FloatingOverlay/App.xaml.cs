@@ -21,6 +21,8 @@ public partial class App : System.Windows.Application
     private IntPtr _foregroundBeforeTray;
     private bool _widgetHiddenForTrayRecovery;
     private bool _appExiting;
+    private ArchitectureV2CompositionRoot? _architectureV2;
+    private Task? _architectureV2StartTask;
 
     public App()
     {
@@ -48,6 +50,13 @@ public partial class App : System.Windows.Application
         var suppressPersistedGhost = e.Args.Any(
             argument => string.Equals(argument, "--no-ghost", StringComparison.OrdinalIgnoreCase));
         MainWindow = new MainWindow(suppressPersistedGhost);
+
+        if (ArchitectureV2CompositionRoot.IsEnabled(e.Args))
+        {
+            _architectureV2 = ArchitectureV2CompositionRoot.Create(Dispatcher);
+            _architectureV2StartTask = StartArchitectureV2Async(_architectureV2);
+            WidgetLogger.Info("ArchitectureV2", "composition_feature_enabled");
+        }
 
         try
         {
@@ -169,6 +178,7 @@ public partial class App : System.Windows.Application
     {
         WidgetLogger.Info("App", "shutdown_begin", ("exitCode", e.ApplicationExitCode));
         _appExiting = true;
+        StopArchitectureV2();
         if (_trayIcon is not null)
         {
             _trayIcon.Visible = false;
@@ -180,6 +190,45 @@ public partial class App : System.Windows.Application
         _trayMenu?.Dispose();
         ReleaseSingleInstance();
         base.OnExit(e);
+    }
+
+    private async Task StartArchitectureV2Async(ArchitectureV2CompositionRoot composition)
+    {
+        try
+        {
+            await composition.StartAsync().ConfigureAwait(false);
+            WidgetLogger.Info("ArchitectureV2", "composition_started");
+        }
+        catch (Exception exception)
+        {
+            WidgetLogger.Error("ArchitectureV2", "composition_start_failed", exception);
+            await composition.DisposeAsync().ConfigureAwait(false);
+            _architectureV2 = null;
+        }
+    }
+
+    private void StopArchitectureV2()
+    {
+        if (_architectureV2 is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _architectureV2StartTask?.GetAwaiter().GetResult();
+            _architectureV2.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            WidgetLogger.Info("ArchitectureV2", "composition_stopped");
+        }
+        catch (Exception exception)
+        {
+            WidgetLogger.Error("ArchitectureV2", "composition_stop_failed", exception);
+        }
+        finally
+        {
+            _architectureV2 = null;
+            _architectureV2StartTask = null;
+        }
     }
 
     private bool TryAcquireSingleInstance()

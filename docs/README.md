@@ -25,6 +25,7 @@
 - [Architecture v2: M7 Windows adapters](technical/architecture-v2-m7-implementation-2026-08-15.md) — hidden process runner, Claude direct/statusLine adapters и persistent Codex app-server session.
 - [Architecture v2: M8 Claude signal pump](technical/architecture-v2-m8-implementation-2026-08-15.md) — FileSystemWatcher, debounce/coalescing и публикация statusLine в single-writer Store.
 - [Architecture v2: M9 Presentation/ViewModel](technical/architecture-v2-m9-implementation-2026-08-15.md) — pure VM contract, compact percent/countdown formatting и change-only notifications.
+- [Architecture v2: M10 WPF composition](technical/architecture-v2-m10-implementation-2026-08-15.md) — feature-flagged composition root, Dispatcher bridge и lifecycle wiring.
 
 ## Правила ведения
 
