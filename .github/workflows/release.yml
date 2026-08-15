@@ -35,25 +35,63 @@ jobs:
             'tests/LLMLimitsWidget.ClaudeStatusLineBridge.Tests/LLMLimitsWidget.ClaudeStatusLineBridge.Tests.csproj'
           )
           $projects | ForEach-Object { dotnet run --project $_ -p:UseSharedCompilation=false; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }
-      - name: Publish portable build
-        run: dotnet publish spikes/FloatingOverlay/FloatingOverlay.csproj --configuration Release --runtime win-x64 --self-contained false --output artifacts/publish/win-x64 -p:UseSharedCompilation=false
+      - name: Publish self-contained build
+        shell: pwsh
+        run: .\scripts\publish-release.ps1 -Runtime win-x64 -OutputName win-x64-self-contained -SelfContained
+      - name: Publish framework-dependent build
+        shell: pwsh
+        run: .\scripts\publish-release.ps1 -Runtime win-x64 -OutputName win-x64-framework-dependent
+      - name: Download .NET Windows Desktop Runtime bootstrapper
+        shell: pwsh
+        run: |
+          $runtimeDirectory = 'artifacts/runtime'
+          New-Item -ItemType Directory -Path $runtimeDirectory -Force | Out-Null
+          $runtimeInstaller = Join-Path $runtimeDirectory 'windowsdesktop-runtime-win-x64.exe'
+          Invoke-WebRequest `
+            -Uri 'https://aka.ms/dotnet/10.0/windowsdesktop-runtime-win-x64.exe' `
+            -OutFile $runtimeInstaller
+          if ((Get-Item -LiteralPath $runtimeInstaller).Length -lt 10MB) {
+            throw '.NET Windows Desktop Runtime bootstrapper download looks invalid.'
+          }
       - name: Install Inno Setup
         run: choco install innosetup --no-progress --yes
-      - name: Build installer
+      - name: Build self-contained installer
         shell: pwsh
         env:
           RELEASE_VERSION: ${{ inputs.version || github.ref_name }}
         run: |
-          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$env:RELEASE_VERSION" packaging/LLMLimitsWidget.iss
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          $version = $env:RELEASE_VERSION.TrimStart('v')
+          & $iscc "/DMyAppVersion=$version" "/DPublishDir=$pwd\artifacts\publish\win-x64-self-contained" "/DInstallerSuffix=self-contained" "/DRequiresRuntime=0" packaging/LLMLimitsWidget.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Create portable ZIP
+      - name: Build framework-dependent installer with runtime bootstrapper
         shell: pwsh
         env:
           RELEASE_VERSION: ${{ inputs.version || github.ref_name }}
-        run: Compress-Archive -Path artifacts/publish/win-x64/* -DestinationPath "artifacts/LLM-Limits-Widget-$env:RELEASE_VERSION-win-x64.zip"
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          $version = $env:RELEASE_VERSION.TrimStart('v')
+          & $iscc "/DMyAppVersion=$version" "/DPublishDir=$pwd\artifacts\publish\win-x64-framework-dependent" "/DInstallerSuffix=framework-dependent" "/DRequiresRuntime=1" "/DRuntimeInstallerPath=$pwd\artifacts\runtime\windowsdesktop-runtime-win-x64.exe" packaging/LLMLimitsWidget.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Create portable ZIPs
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.version || github.ref_name }}
+        run: |
+          $version = $env:RELEASE_VERSION.TrimStart('v')
+          Compress-Archive -Path artifacts/publish/win-x64-self-contained/* -DestinationPath "artifacts/LLM-Limits-Widget-$version-win-x64-self-contained.zip"
+          Compress-Archive -Path artifacts/publish/win-x64-framework-dependent/* -DestinationPath "artifacts/LLM-Limits-Widget-$version-win-x64-framework-dependent.zip"
+      - name: Generate product changelog
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.version || github.ref_name }}
+        run: .\scripts\generate-product-changelog.ps1 -Version $env:RELEASE_VERSION
       - name: Publish GitHub release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ inputs.version || github.ref_name }}
-        run: gh release create $env:RELEASE_VERSION artifacts/installer/*.exe artifacts/*.zip --title "LLM Limits Widget $env:RELEASE_VERSION" --generate-notes
+        run: |
+          $version = $env:RELEASE_VERSION.TrimStart('v')
+          $tag = "v$version"
+          gh release create $tag artifacts/installer/*.exe artifacts/*.zip --title "LLM Limits Widget $tag" --notes-file artifacts/release-notes.md

@@ -33,14 +33,14 @@ The preference is persisted in `widget-settings.json`. If it is enabled, startup
 
 ## Release delivery
 
-`scripts/publish-release.ps1` produces a portable `win-x64` release under `artifacts/publish`. The publish target explicitly copies the independent Claude statusLine bridge into the release output, so the configured fast channel remains deployable.
+`scripts/publish-release.ps1` produces a release under `artifacts/publish`. The main application and the independent Claude statusLine bridge are published with the same self-contained mode, so the autonomous variant remains deployable without a separately installed .NET runtime.
 
-`packaging/LLMLimitsWidget.iss` builds an Inno Setup installer from that published directory. Installation intentionally does not force autostart; the user chooses it from the tray.
+`packaging/LLMLimitsWidget.iss` is parameterized by publish directory and release variant. The self-contained installer carries the application runtime. The framework-dependent installer carries the official Windows Desktop Runtime bootstrapper, checks `dotnet --list-runtimes`, and installs .NET 10 silently only when the required desktop runtime is missing. Installation intentionally does not force autostart; the user chooses it from the tray.
 
 GitHub Actions:
 
 - `CI` runs all domain, application, provider, infrastructure, presentation, architecture, and bridge tests on `windows-latest`; it also publishes and stores the portable build artifact.
-- `Release` runs for `v*` tags (or dispatch), builds the portable ZIP and Inno Setup installer, then creates the GitHub release with both artifacts.
+- `Release` runs for `v*` tags (or dispatch), builds self-contained and framework-dependent publish directories, creates two ZIPs and two Inno Setup installers, then creates the GitHub release with all four distribution artifacts.
 
 ## Verification
 

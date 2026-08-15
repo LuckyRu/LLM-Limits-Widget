@@ -50,10 +50,18 @@
 Portable Windows-релиз собирается так:
 
 ```powershell
-.\scripts\publish-release.ps1
+.\scripts\publish-release.ps1 -Runtime win-x64 -OutputName win-x64-framework-dependent
 ```
 
-Результат появляется в `artifacts\publish\win-x64`; он включает bridge Claude statusLine. Если установлен Inno Setup 6, добавить `-BuildInstaller`, чтобы собрать установщик. Для опубликованных `v*` тегов GitHub Actions создаёт ZIP и installer автоматически.
+Результат появляется в `artifacts\publish\win-x64-framework-dependent`; он включает bridge Claude statusLine. Для автономной сборки используйте `.\scripts\publish-release.ps1 -Runtime win-x64 -OutputName win-x64-self-contained -SelfContained`.
+
+Релизный workflow собирает оба варианта:
+
+- `self-contained` — приложение и .NET runtime внутри ZIP/installer, отдельная установка .NET не нужна;
+- `framework-dependent` — компактное приложение, а installer содержит официальный bootstrapper .NET 10 Windows Desktop Runtime и устанавливает его только при необходимости.
+
+Для опубликованных `v*` тегов GitHub Actions автоматически создаёт два ZIP и два installer-файла.
+Текст GitHub Release формируется отдельным продуктовым changelog-скриптом по правилам из `docs/product-changelog-policy.md`.
 
 ## Рабочее название
 

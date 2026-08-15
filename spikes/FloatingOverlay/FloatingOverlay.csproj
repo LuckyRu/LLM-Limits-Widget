@@ -18,7 +18,7 @@
     <ProjectReference Include="..\..\src\LLMLimitsWidget.Infrastructure.Windows\LLMLimitsWidget.Infrastructure.Windows.csproj" />
     <ProjectReference Include="..\..\src\LLMLimitsWidget.Presentation\LLMLimitsWidget.Presentation.csproj" />
   </ItemGroup>
-  <Target Name="BuildClaudeStatusLineBridge" AfterTargets="Build">
+  <Target Name="BuildClaudeStatusLineBridge" AfterTargets="Build" Condition="'$(SkipClaudeStatusLineBridgeBuild)' != 'true'">
     <MSBuild Projects="$(MSBuildProjectDirectory)\..\..\src\LLMLimitsWidget.ClaudeStatusLineBridge\LLMLimitsWidget.ClaudeStatusLineBridge.csproj"
              Targets="Build"
              Properties="Configuration=$(Configuration);UseSharedCompilation=$(UseSharedCompilation);RuntimeIdentifier=;SelfContained=false" />
