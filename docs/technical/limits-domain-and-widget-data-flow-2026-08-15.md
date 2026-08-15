@@ -41,7 +41,23 @@ The widget is now wired to real local adapters:
 - Neither adapter reads credentials, cookies, prompts, transcripts, or API keys. Codex receives the user's normal `.codex` home through `CODEX_HOME`; Claude uses its normal first-party subscription login.
 - `DemoCodexLimitsDataSource` and `DemoClaudeLimitsDataSource` remain available for deterministic visual/domain tests but are no longer wired into the running widget.
 
-The statusLine/Named Pipe bridge is intentionally the next transport increment for Claude. Direct `/usage` is the current authoritative fallback and startup/manual refresh source; adding the bridge will not change the domain contract.
+Claude statusLine bridge is now implemented in `spikes/ClaudeStatusLineBridge`. It reads only stdin JSON, extracts `rate_limits`, and atomically writes a redacted snapshot to `%LOCALAPPDATA%\LLMLimitsWidget\claude-statusline-snapshot.json`. It never writes the prompt, transcript path, cwd, model, account, or credentials, and exits with code 0 even for malformed input so Claude's own statusLine is not broken.
+
+`ClaudeHybridLimitsDataSource` reads that snapshot first. A snapshot younger than three minutes is used immediately. If it is stale, direct `/usage` is allowed after a five-minute cooldown when a recent statusLine session is known, or after a fifteen-minute cooldown when no recent session is known. Manual refresh bypasses the cooldown and runs `/usage` once. If direct refresh fails, the last statusLine value remains visible as `Stale`.
+
+The bridge binary is intentionally not injected into the user's Claude settings automatically. This protects existing Claude configuration and makes activation explicit. After building Release, the statusLine command can be configured as:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "powershell -NoProfile -Command \"& 'D:/prg/LLMLimitsWidget/spikes/ClaudeStatusLineBridge/bin/Release/net10.0-windows/LLMLimitsWidget.ClaudeStatusLineBridge.exe'\"",
+    "refreshInterval": 60
+  }
+}
+```
+
+Direct `/usage` remains the authoritative fallback and startup/manual refresh source; the bridge does not change the domain contract.
 
 ## Lifecycle
 
@@ -65,3 +81,5 @@ dotnet run --project .\spikes\FloatingOverlay.DomainTests\FloatingOverlay.Domain
 ```
 
 The smoke output is redacted to provider, status, percentage, and reset time. It does not print raw provider responses or authentication material.
+
+The bridge can be tested by piping one statusLine JSON object to `LLMLimitsWidget.ClaudeStatusLineBridge.exe`; it writes one atomic snapshot and exits successfully.

@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 
 namespace LLMLimitsWidget.FloatingOverlay;
 
-public sealed class ClaudeUsageLimitsDataSource : ILimitsDataSource
+public sealed class ClaudeUsageLimitsDataSource : IForceRefreshableLimitsDataSource
 {
     private readonly string _executablePath;
     private readonly TimeSpan _timeout;
@@ -19,6 +19,11 @@ public sealed class ClaudeUsageLimitsDataSource : ILimitsDataSource
     }
 
     public LimitProviderId Provider => LimitProviderId.Claude;
+
+    public Task<ProviderLimitsSnapshot> ForceRefreshAsync(CancellationToken cancellationToken)
+    {
+        return GetSnapshotAsync(cancellationToken);
+    }
 
     public async Task<ProviderLimitsSnapshot> GetSnapshotAsync(CancellationToken cancellationToken)
     {

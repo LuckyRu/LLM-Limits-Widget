@@ -79,6 +79,11 @@ public interface ILimitsDataSource
     Task<ProviderLimitsSnapshot> GetSnapshotAsync(CancellationToken cancellationToken);
 }
 
+public interface IForceRefreshableLimitsDataSource : ILimitsDataSource
+{
+    Task<ProviderLimitsSnapshot> ForceRefreshAsync(CancellationToken cancellationToken);
+}
+
 /// <summary>
 /// Coordinates independent provider sources. One failing provider never prevents
 /// the other provider from updating the widget.
@@ -135,12 +140,14 @@ public sealed class LimitsCoordinator : IAsyncDisposable
         }
     }
 
-    public async Task<LimitsSnapshot> RefreshAsync(CancellationToken cancellationToken = default)
+    public async Task<LimitsSnapshot> RefreshAsync(
+        CancellationToken cancellationToken = default,
+        bool force = false)
     {
         var now = DateTimeOffset.UtcNow;
         var previous = Current;
         var results = await Task.WhenAll(_sources.Select(source =>
-            ReadSourceSafelyAsync(source, previous, now, cancellationToken)));
+            ReadSourceSafelyAsync(source, previous, now, cancellationToken, force)));
         var providers = results.ToDictionary(result => result.Provider);
         var snapshot = new LimitsSnapshot(
             now,
@@ -209,11 +216,14 @@ public sealed class LimitsCoordinator : IAsyncDisposable
         ILimitsDataSource source,
         LimitsSnapshot previous,
         DateTimeOffset now,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool force)
     {
         try
         {
-            var result = await source.GetSnapshotAsync(cancellationToken).ConfigureAwait(false);
+            var result = source is IForceRefreshableLimitsDataSource forceRefreshable && force
+                ? await forceRefreshable.ForceRefreshAsync(cancellationToken).ConfigureAwait(false)
+                : await source.GetSnapshotAsync(cancellationToken).ConfigureAwait(false);
             if (result.Provider != source.Provider)
             {
                 throw new InvalidOperationException(

@@ -4,7 +4,7 @@ using System.Text.Json;
 
 namespace LLMLimitsWidget.FloatingOverlay;
 
-public sealed class CodexAppServerLimitsDataSource : ILimitsDataSource
+public sealed class CodexAppServerLimitsDataSource : IForceRefreshableLimitsDataSource
 {
     private const int InitializeRequestId = 1;
     private const int RateLimitsRequestId = 2;
@@ -20,6 +20,11 @@ public sealed class CodexAppServerLimitsDataSource : ILimitsDataSource
     }
 
     public LimitProviderId Provider => LimitProviderId.Codex;
+
+    public Task<ProviderLimitsSnapshot> ForceRefreshAsync(CancellationToken cancellationToken)
+    {
+        return GetSnapshotAsync(cancellationToken);
+    }
 
     public async Task<ProviderLimitsSnapshot> GetSnapshotAsync(CancellationToken cancellationToken)
     {

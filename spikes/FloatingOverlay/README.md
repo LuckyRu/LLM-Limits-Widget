@@ -17,7 +17,7 @@ Run from the repository root:
 dotnet run --project .\spikes\FloatingOverlay\FloatingOverlay.csproj
 ```
 
-The widget now has a provider-neutral limits domain in `Domain/LimitDomain.cs`. `LimitsCoordinator` polls independent `ILimitsDataSource` implementations, isolates provider failures, and publishes one normalized snapshot to both layout variants. The running app uses `Infrastructure/CodexAppServerLimitsDataSource.cs` and `Infrastructure/ClaudeUsageLimitsDataSource.cs`; demo sources remain only for deterministic tests. Domain behavior is covered by `spikes/FloatingOverlay.DomainTests`, which also supports a redacted `--real` provider smoke test.
+The widget now has a provider-neutral limits domain in `Domain/LimitDomain.cs`. `LimitsCoordinator` polls independent `ILimitsDataSource` implementations, isolates provider failures, and publishes one normalized snapshot to both layout variants. The running app uses `Infrastructure/CodexAppServerLimitsDataSource.cs` and `Infrastructure/ClaudeStatusLineBridge.cs` (`ClaudeHybridLimitsDataSource` with `/usage` fallback); demo sources remain only for deterministic tests. The standalone `ClaudeStatusLineBridge` process is configured explicitly in Claude Code's statusLine settings. Domain behavior is covered by `spikes/FloatingOverlay.DomainTests`, which also supports a redacted `--real` provider smoke test.
 
 ## Tray icon
 

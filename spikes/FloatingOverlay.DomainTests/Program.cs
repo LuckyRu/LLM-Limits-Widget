@@ -1,4 +1,5 @@
 using LLMLimitsWidget.FloatingOverlay;
+using System.IO;
 using System.Text.Json;
 
 var failures = new List<string>();
@@ -56,6 +57,40 @@ AssertEqual(73d, parsedClaude.Windows[0].SafeRemainingPercent!.Value, "Claude pa
 AssertEqual(53d, parsedClaude.Windows[1].SafeRemainingPercent!.Value, "Claude parser converts weekly usage");
 AssertEqual(true, parsedClaude.Windows.All(window => window.ResetAt.HasValue), "Claude parser reads reset timestamps");
 
+var statusLineFixture = """
+{
+  "version": "2.1.227",
+  "rate_limits": {
+    "five_hour": { "used_percentage": 23.5, "resets_at": 1786793399 },
+    "seven_day": { "used_percentage": 41.2, "resets_at": 1787057999 }
+  }
+}
+""";
+var parsedStatusLine = ClaudeStatusLineParser.Parse(statusLineFixture, DateTimeOffset.UtcNow);
+AssertEqual(2, parsedStatusLine.Windows.Count, "Claude statusLine parser reads both windows");
+AssertEqual(76.5d, parsedStatusLine.Windows[0].SafeRemainingPercent!.Value, "statusLine converts session usage");
+AssertEqual(58.8d, parsedStatusLine.Windows[1].SafeRemainingPercent!.Value, "statusLine converts weekly usage");
+var bridgeSnapshotPath = Path.Combine(
+    Path.GetTempPath(),
+    $"llm-limits-domain-test-{Guid.NewGuid():N}.json");
+try
+{
+    AssertEqual(
+        0,
+        await ClaudeStatusLineBridge.RunAsync(new StringReader(statusLineFixture), bridgeSnapshotPath),
+        "statusLine bridge accepts valid input");
+    var statusLineSource = new ClaudeStatusLineLimitsDataSource(
+        bridgeSnapshotPath,
+        TimeSpan.FromMinutes(3));
+    var statusLineSnapshot = await statusLineSource.GetSnapshotAsync(CancellationToken.None);
+    AssertEqual(LimitDataStatus.Fresh, statusLineSnapshot.Status, "statusLine snapshot is fresh");
+    AssertEqual(2, statusLineSnapshot.Windows.Count, "statusLine snapshot is readable by the provider");
+}
+finally
+{
+    File.Delete(bridgeSnapshotPath);
+}
+
 var updates = 0;
 var healthySource = new FixedSource(
     LimitProviderId.Codex,
@@ -98,7 +133,7 @@ if (failures.Count > 0)
     return 1;
 }
 
-Console.WriteLine("Limits domain: 18 cases passed.");
+Console.WriteLine("Limits domain: 23 cases passed.");
 return 0;
 
 static async Task RunRealProviderSmokeAsync()
@@ -106,7 +141,7 @@ static async Task RunRealProviderSmokeAsync()
     var sources = new ILimitsDataSource[]
     {
         new CodexAppServerLimitsDataSource(),
-        new ClaudeUsageLimitsDataSource()
+        new ClaudeHybridLimitsDataSource()
     };
     await using var coordinator = new LimitsCoordinator(sources);
     var snapshot = await coordinator.RefreshAsync();

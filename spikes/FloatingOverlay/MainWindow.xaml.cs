@@ -49,7 +49,7 @@ public partial class MainWindow : Window
                 new ILimitsDataSource[]
             {
                 new CodexAppServerLimitsDataSource(),
-                new ClaudeUsageLimitsDataSource()
+                new ClaudeHybridLimitsDataSource()
             });
         _limitsCoordinator.SnapshotChanged += LimitsCoordinator_SnapshotChanged;
     }
@@ -202,7 +202,7 @@ public partial class MainWindow : Window
 
     private void RefreshButton_Click(object sender, RoutedEventArgs e)
     {
-        _ = RefreshLimitsAsync();
+        _ = RefreshLimitsAsync(force: true);
     }
 
     private void ScaleMenuItem_Click(object sender, RoutedEventArgs e)
@@ -221,7 +221,7 @@ public partial class MainWindow : Window
 
     private void RefreshMenuItem_Click(object sender, RoutedEventArgs e)
     {
-        _ = RefreshLimitsAsync();
+        _ = RefreshLimitsAsync(force: true);
     }
 
     private void SurfaceOpacitySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -441,11 +441,11 @@ public partial class MainWindow : Window
         PersistSettings();
     }
 
-    private async Task RefreshLimitsAsync()
+    private async Task RefreshLimitsAsync(bool force = false)
     {
         try
         {
-            await _limitsCoordinator.RefreshAsync();
+            await _limitsCoordinator.RefreshAsync(force: force);
         }
         catch (OperationCanceledException)
         {
