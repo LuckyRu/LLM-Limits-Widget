@@ -80,25 +80,25 @@
                                               Grid.Row="0"
                                               Provider="OpenAi"
                                               Accent="{StaticResource CodexBrush}"
-                                              MetricOneValue="62"
-                                              MetricOnePercent="62%"
-                                              MetricOnePeriod="W"
-                                              Countdown="◷ 07:03"
-                                              ResetLabel="18 Aug · 07:03" />
+                                              MetricOneValue="0"
+                                              MetricOnePercent=""
+                                              MetricOnePeriod=""
+                                              Countdown=""
+                                              ResetLabel="" />
                     <Border Grid.Row="1" Background="{StaticResource DividerBrush}" />
                     <local:ProviderRowControl x:Name="ClaudeVerticalRow"
                                               Grid.Row="2"
                                               Provider="Claude"
                                               Accent="{StaticResource ClaudeBrush}"
-                                              MetricOneValue="5"
-                                              MetricOnePercent="5%"
-                                              MetricOnePeriod="5h"
-                                              MetricTwoValue="70"
-                                              MetricTwoPercent="70%"
-                                              MetricTwoPeriod="7d"
+                                              MetricOneValue="0"
+                                              MetricOnePercent=""
+                                              MetricOnePeriod=""
+                                              MetricTwoValue="0"
+                                              MetricTwoPercent=""
+                                              MetricTwoPeriod=""
                                               HasSecondMetric="True"
-                                              Countdown="◷ 00:30"
-                                              ResetLabel="13 Aug · 00:30" />
+                                              Countdown=""
+                                              ResetLabel="" />
                 </Grid>
 
                 <Grid x:Name="HorizontalLayout" Visibility="Collapsed">
@@ -112,11 +112,11 @@
                                               Compact="True"
                                               Provider="OpenAi"
                                               Accent="{StaticResource CodexBrush}"
-                                              MetricOneValue="62"
-                                              MetricOnePercent="62%"
-                                              MetricOnePeriod="W"
-                                              Countdown="◷ 07:03"
-                                              ResetLabel="18 Aug · 07:03" />
+                                              MetricOneValue="0"
+                                              MetricOnePercent=""
+                                              MetricOnePeriod=""
+                                              Countdown=""
+                                              ResetLabel="" />
                     <Border Grid.Column="1"
                             Width="1"
                             Height="40"
@@ -128,15 +128,15 @@
                                               Compact="True"
                                               Provider="Claude"
                                               Accent="{StaticResource ClaudeBrush}"
-                                              MetricOneValue="5"
-                                              MetricOnePercent="5%"
-                                              MetricOnePeriod="5h"
-                                              MetricTwoValue="70"
-                                              MetricTwoPercent="70%"
-                                              MetricTwoPeriod="7d"
+                                              MetricOneValue="0"
+                                              MetricOnePercent=""
+                                              MetricOnePeriod=""
+                                              MetricTwoValue="0"
+                                              MetricTwoPercent=""
+                                              MetricTwoPeriod=""
                                               HasSecondMetric="True"
-                                              Countdown="◷ 00:30"
-                                              ResetLabel="13 Aug · 00:30" />
+                                              Countdown=""
+                                              ResetLabel="" />
                 </Grid>
             </Grid>
         </Border>
