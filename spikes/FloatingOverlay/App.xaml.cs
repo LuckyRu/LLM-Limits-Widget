@@ -16,6 +16,8 @@ public partial class App : System.Windows.Application
     private Icon? _trayIconAsset;
     private Stream? _trayIconStream;
     private FormsToolStripMenuItem? _ghostModeMenuItem;
+    private Mutex? _singleInstanceMutex;
+    private bool _singleInstanceMutexOwned;
     private IntPtr _foregroundBeforeTray;
     private bool _widgetHiddenForTrayRecovery;
     private bool _appExiting;
@@ -35,6 +37,14 @@ public partial class App : System.Windows.Application
             "startup_begin",
             ("arguments", string.Join(" ", e.Args)));
         base.OnStartup(e);
+
+        if (!TryAcquireSingleInstance())
+        {
+            WidgetLogger.Info("App", "duplicate_instance_exit");
+            Shutdown();
+            return;
+        }
+
         var suppressPersistedGhost = e.Args.Any(
             argument => string.Equals(argument, "--no-ghost", StringComparison.OrdinalIgnoreCase));
         MainWindow = new MainWindow(suppressPersistedGhost);
@@ -168,7 +178,69 @@ public partial class App : System.Windows.Application
         _trayIconAsset?.Dispose();
         _trayIconStream?.Dispose();
         _trayMenu?.Dispose();
+        ReleaseSingleInstance();
         base.OnExit(e);
+    }
+
+    private bool TryAcquireSingleInstance()
+    {
+        try
+        {
+            _singleInstanceMutex = new Mutex(
+                initiallyOwned: false,
+                name: "Local\\LLMLimitsWidget.FloatingOverlay",
+                createdNew: out _);
+            try
+            {
+                if (_singleInstanceMutex.WaitOne(0))
+                {
+                    _singleInstanceMutexOwned = true;
+                    return true;
+                }
+            }
+            catch (AbandonedMutexException)
+            {
+                _singleInstanceMutexOwned = true;
+                return true;
+            }
+
+            _singleInstanceMutex.Dispose();
+            _singleInstanceMutex = null;
+            return false;
+        }
+        catch (Exception exception)
+        {
+            WidgetLogger.Critical("App", "single_instance_check_failed", exception);
+            _singleInstanceMutex?.Dispose();
+            _singleInstanceMutex = null;
+            return false;
+        }
+    }
+
+    private void ReleaseSingleInstance()
+    {
+        if (_singleInstanceMutex is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (_singleInstanceMutexOwned)
+            {
+                _singleInstanceMutex.ReleaseMutex();
+            }
+        }
+        catch (ApplicationException)
+        {
+            // The mutex may already have been released by the operating system.
+        }
+        finally
+        {
+            _singleInstanceMutex.Dispose();
+            _singleInstanceMutex = null;
+            _singleInstanceMutexOwned = false;
+        }
     }
 
     private void App_DispatcherUnhandledException(
