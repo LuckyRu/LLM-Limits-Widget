@@ -18,6 +18,7 @@
 - [Architecture v2: ТЗ на реализацию](technical/architecture-v2-implementation-spec-2026-08-15.md) — deliverables, use cases, нормативные flows, state tables, этапы миграции и обязательная матрица тестов.
 - [Architecture v2: M1 implementation](technical/architecture-v2-m1-implementation-2026-08-15.md) — фактически созданный Domain-срез, его границы, текущие ограничения и команды проверки.
 - [Architecture v2: M2 implementation](technical/architecture-v2-m2-implementation-2026-08-15.md) — single-writer AppStore, priority lanes и tracked provider runtime.
+- [Architecture v2: M3 Codex implementation](technical/architecture-v2-m3-implementation-2026-08-15.md) — новый pure Codex parser и mapping в domain observation envelope.
 
 ## Правила ведения
 
