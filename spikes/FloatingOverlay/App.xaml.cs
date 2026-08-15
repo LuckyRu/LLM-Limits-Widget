@@ -20,8 +20,20 @@ public partial class App : System.Windows.Application
     private bool _widgetHiddenForTrayRecovery;
     private bool _appExiting;
 
+    public App()
+    {
+        WidgetLogger.Initialize();
+        DispatcherUnhandledException += App_DispatcherUnhandledException;
+        AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
+        TaskScheduler.UnobservedTaskException += TaskScheduler_UnobservedTaskException;
+    }
+
     protected override void OnStartup(StartupEventArgs e)
     {
+        WidgetLogger.Info(
+            "App",
+            "startup_begin",
+            ("arguments", string.Join(" ", e.Args)));
         base.OnStartup(e);
         var suppressPersistedGhost = e.Args.Any(
             argument => string.Equals(argument, "--no-ghost", StringComparison.OrdinalIgnoreCase));
@@ -106,6 +118,7 @@ public partial class App : System.Windows.Application
                                           or ExternalException
                                           or ArgumentException)
         {
+            WidgetLogger.Error("Tray", "tray_initialization_failed", exception);
             _trayIcon?.Dispose();
             _trayIcon = null;
             _trayMenu?.Dispose();
@@ -124,16 +137,27 @@ public partial class App : System.Windows.Application
         MainWindow.Show();
         if (MainWindow is MainWindow loadedWidget)
         {
+            if (suppressPersistedGhost)
+            {
+                loadedWidget.ResetWidgetPosition();
+            }
             UpdateGhostMenuStatus(loadedWidget, loadedWidget.LastGhostModeResult);
         }
         if (MainWindow is MainWindow shownWidget && !shownWidget.IsGhostInputSuppressed)
         {
             MainWindow.Activate();
         }
+
+        WidgetLogger.Info(
+            "App",
+            "startup_complete",
+            ("trayAvailable", _trayIcon is not null),
+            ("ghostMode", MainWindow is MainWindow widget && widget.IsGhostModeEnabled));
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
+        WidgetLogger.Info("App", "shutdown_begin", ("exitCode", e.ApplicationExitCode));
         _appExiting = true;
         if (_trayIcon is not null)
         {
@@ -145,6 +169,34 @@ public partial class App : System.Windows.Application
         _trayIconStream?.Dispose();
         _trayMenu?.Dispose();
         base.OnExit(e);
+    }
+
+    private void App_DispatcherUnhandledException(
+        object sender,
+        System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)
+    {
+        WidgetLogger.Critical("Wpf", "dispatcher_unhandled_exception", e.Exception);
+        e.Handled = true;
+    }
+
+    private void CurrentDomain_UnhandledException(object? sender, UnhandledExceptionEventArgs e)
+    {
+        if (e.ExceptionObject is Exception exception)
+        {
+            WidgetLogger.Critical("Runtime", "unhandled_exception", exception, ("terminating", e.IsTerminating));
+        }
+        else
+        {
+            WidgetLogger.Critical("Runtime", "unhandled_non_exception", null, ("terminating", e.IsTerminating));
+        }
+    }
+
+    private void TaskScheduler_UnobservedTaskException(
+        object? sender,
+        UnobservedTaskExceptionEventArgs e)
+    {
+        WidgetLogger.Error("Runtime", "unobserved_task_exception", e.Exception);
+        e.SetObserved();
     }
 
     private void ExitApplication()

@@ -26,3 +26,9 @@ The tray uses the selected dual-gauge concept: cyan and orange limit arcs around
 ## User settings
 
 The widget persists its local profile as JSON at `%LOCALAPPDATA%\LLMLimitsWidget\widget-settings.json`. The versioned profile includes layout orientation, requested scale, background and border opacity, corner radius, monitor identity, normalized physical-monitor position, snapped edges, saved DPI, and monitor bounds for fallback selection. Raw `Left`/`Top` coordinates from the old profile are intentionally not restored. Missing monitors fall back to the closest remaining monitor, then the cursor monitor. Invalid or unavailable settings fall back to safe defaults without blocking the widget. The tray menu can always show the widget or reset it to a safe position; the widget itself does not create a taskbar button.
+
+## Diagnostics and logs
+
+The WPF host, refresh coordinator, provider processes, settings store, status-line bridge, and unhandled exception handlers write structured JSON Lines logs to `%LOCALAPPDATA%\LLMLimitsWidget\logs`. If that directory is unavailable, the logger falls back to `%TEMP%\LLMLimitsWidget\logs`. The active file is `widget-YYYY-MM-DD.log`; it rotates at 2 MiB, keeps up to five rotations per day, and removes files older than 14 days. Provider output, prompts, tokens, credentials, and limit payloads are never written; process diagnostics contain only executable name, exit code, and output lengths.
+
+The `--no-ghost` startup argument is a recovery launch: it disables the persisted ghost preference and places the widget at a safe position on the current monitor. This is useful when the widget is visible but input-suppressed or its saved position is difficult to recover. The logger is fail-safe, so an unavailable log directory cannot prevent the widget from starting.

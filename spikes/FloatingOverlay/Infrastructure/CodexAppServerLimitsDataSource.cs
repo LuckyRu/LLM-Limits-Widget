@@ -55,6 +55,13 @@ public sealed class CodexAppServerLimitsDataSource : IForceRefreshableLimitsData
             throw new InvalidOperationException("Codex app-server did not start.");
         }
 
+        WidgetLogger.Debug(
+            "Codex",
+            "app_server_started",
+            ("executable", Path.GetFileName(_executablePath)),
+            ("processId", process.Id),
+            ("timeoutSeconds", _timeout.TotalSeconds));
+
         using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutSource.CancelAfter(_timeout);
         try
@@ -93,11 +100,21 @@ public sealed class CodexAppServerLimitsDataSource : IForceRefreshableLimitsData
                     continue;
                 }
 
-                return CodexRateLimitsParser.Parse(line, DateTimeOffset.Now);
+                var snapshot = CodexRateLimitsParser.Parse(line, DateTimeOffset.Now);
+                WidgetLogger.Debug(
+                    "Codex",
+                    "rate_limits_received",
+                    ("status", snapshot.Status),
+                    ("windowCount", snapshot.Windows.Count));
+                return snapshot;
             }
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
+            WidgetLogger.Warning(
+                "Codex",
+                "app_server_timed_out",
+                ("timeoutSeconds", _timeout.TotalSeconds));
             throw new TimeoutException(
                 $"Codex app-server exceeded the {_timeout.TotalSeconds:0}s timeout.");
         }

@@ -32,7 +32,7 @@ public partial class MainWindow : Window
     public MainWindow(bool suppressPersistedGhost = false)
     {
         _settings = WidgetSettingsStore.Load();
-        _ghostPreference = _settings.GhostModeEnabled;
+        _ghostPreference = suppressPersistedGhost ? false : _settings.GhostModeEnabled;
         _suppressPersistedGhost = suppressPersistedGhost;
         _appearance.Orientation = _settings.Orientation;
         _appearance.Scale = _settings.Scale;
@@ -52,6 +52,13 @@ public partial class MainWindow : Window
                 new ClaudeHybridLimitsDataSource()
             });
         _limitsCoordinator.SnapshotChanged += LimitsCoordinator_SnapshotChanged;
+        WidgetLogger.Info(
+            "Wpf",
+            "window_constructed",
+            ("orientation", _appearance.Orientation),
+            ("scale", _scale),
+            ("persistedGhost", _settings.GhostModeEnabled),
+            ("safeStartup", suppressPersistedGhost));
     }
 
     private void Window_Loaded(object sender, RoutedEventArgs e)
@@ -80,6 +87,12 @@ public partial class MainWindow : Window
         }
         PersistSettings();
         _limitsCoordinator.Start();
+        WidgetLogger.Info(
+            "Wpf",
+            "window_loaded",
+            ("orientation", _appearance.Orientation),
+            ("scale", _scale),
+            ("ghostMode", IsGhostModeEnabled));
     }
 
     private void Window_IsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
@@ -445,10 +458,15 @@ public partial class MainWindow : Window
     {
         try
         {
+            WidgetLogger.Debug("Wpf", "refresh_requested", ("force", force));
             await _limitsCoordinator.RefreshAsync(force: force);
         }
         catch (OperationCanceledException)
         {
+        }
+        catch (Exception exception)
+        {
+            WidgetLogger.Error("Wpf", "refresh_request_failed", exception, ("force", force));
         }
     }
 
@@ -456,17 +474,34 @@ public partial class MainWindow : Window
     {
         if (!Dispatcher.CheckAccess())
         {
-            _ = Dispatcher.InvokeAsync(() => ApplyLimitsSnapshot(snapshot));
+            _ = Dispatcher.InvokeAsync(() =>
+            {
+                try
+                {
+                    ApplyLimitsSnapshot(snapshot);
+                }
+                catch (Exception exception)
+                {
+                    WidgetLogger.Error("Wpf", "snapshot_render_failed", exception);
+                }
+            });
             return;
         }
 
-        ApplyLimitsSnapshot(snapshot);
+        try
+        {
+            ApplyLimitsSnapshot(snapshot);
+        }
+        catch (Exception exception)
+        {
+            WidgetLogger.Error("Wpf", "snapshot_render_failed", exception);
+        }
     }
 
     private void ApplyLimitsSnapshot(LimitsSnapshot snapshot)
     {
         ApplyProviderSnapshot(
-            snapshot.TryGetProvider(LimitProviderId.Codex, out var codex) ? codex : null,
+            snapshot.TryGetProvider(LimitProviderId.Codex, out var codexSnapshot) ? codexSnapshot : null,
             CodexVerticalRow,
             CodexHorizontalRow);
         ApplyProviderSnapshot(
@@ -474,6 +509,11 @@ public partial class MainWindow : Window
             ClaudeVerticalRow,
             ClaudeHorizontalRow);
         ToolTip = $"Лимиты обновлены: {snapshot.UpdatedAt.ToLocalTime():HH:mm:ss}";
+        WidgetLogger.Debug(
+            "Wpf",
+            "snapshot_rendered",
+            ("codexStatus", snapshot.TryGetProvider(LimitProviderId.Codex, out var codex) ? codex.Status : LimitDataStatus.Unavailable),
+            ("claudeStatus", snapshot.TryGetProvider(LimitProviderId.Claude, out var claudeSnapshot) ? claudeSnapshot.Status : LimitDataStatus.Unavailable));
     }
 
     private static void ApplyProviderSnapshot(
@@ -494,12 +534,21 @@ public partial class MainWindow : Window
             .Where(window => window.ResetAt.HasValue)
             .OrderBy(window => window.ResetAt)
             .FirstOrDefault();
-        var countdown = nearestReset?.ResetAt is { } resetAt
+        var fiveHourReset = first?.Kind == LimitWindowKind.FiveHour
+            ? first.ResetAt
+            : windows.FirstOrDefault(window => window.Kind == LimitWindowKind.FiveHour)?.ResetAt;
+        var countdownReset = snapshot?.Provider == LimitProviderId.Claude
+            ? fiveHourReset
+            : nearestReset?.ResetAt;
+        var resetLabelReset = snapshot?.Provider == LimitProviderId.Claude
+            ? second?.ResetAt
+            : countdownReset;
+        var countdown = countdownReset is { } resetAt
             ? $"◷ {resetAt.ToLocalTime():HH:mm}"
             : "◷ —";
-        var resetLabel = nearestReset?.ResetAt is { } reset
-            ? $"{reset.ToLocalTime():dd MMM} · reset"
-            : "reset unavailable";
+        var resetLabel = resetLabelReset is { } reset
+            ? $"{reset.ToLocalTime():dd MMM} · {reset.ToLocalTime():HH:mm}"
+            : "—";
 
         ApplyMetric(verticalRow, first, second, countdown, resetLabel, snapshot);
         ApplyMetric(horizontalRow, first, second, countdown, resetLabel, snapshot);
@@ -623,6 +672,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
+        WidgetLogger.Info("Wpf", "window_closing", ("cancelled", e.Cancel));
         base.OnClosing(e);
         if (e.Cancel)
         {

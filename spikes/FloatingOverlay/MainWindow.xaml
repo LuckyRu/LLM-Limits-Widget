@@ -84,7 +84,7 @@
                                               MetricOnePercent="62%"
                                               MetricOnePeriod="W"
                                               Countdown="◷ 07:03"
-                                              ResetLabel="18 Aug · reset" />
+                                              ResetLabel="18 Aug · 07:03" />
                     <Border Grid.Row="1" Background="{StaticResource DividerBrush}" />
                     <local:ProviderRowControl x:Name="ClaudeVerticalRow"
                                               Grid.Row="2"
@@ -98,7 +98,7 @@
                                               MetricTwoPeriod="7d"
                                               HasSecondMetric="True"
                                               Countdown="◷ 00:30"
-                                              ResetLabel="13 Aug · reset" />
+                                              ResetLabel="13 Aug · 00:30" />
                 </Grid>
 
                 <Grid x:Name="HorizontalLayout" Visibility="Collapsed">
@@ -116,7 +116,7 @@
                                               MetricOnePercent="62%"
                                               MetricOnePeriod="W"
                                               Countdown="◷ 07:03"
-                                              ResetLabel="18 Aug · reset" />
+                                              ResetLabel="18 Aug · 07:03" />
                     <Border Grid.Column="1"
                             Width="1"
                             Height="40"
@@ -136,7 +136,7 @@
                                               MetricTwoPeriod="7d"
                                               HasSecondMetric="True"
                                               Countdown="◷ 00:30"
-                                              ResetLabel="13 Aug · reset" />
+                                              ResetLabel="13 Aug · 00:30" />
                 </Grid>
             </Grid>
         </Border>

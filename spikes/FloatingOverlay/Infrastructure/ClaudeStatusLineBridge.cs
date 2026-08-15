@@ -25,17 +25,20 @@ public static class ClaudeStatusLineBridge
         string? snapshotPath = null,
         CancellationToken cancellationToken = default)
     {
+        WidgetLogger.Initialize();
         try
         {
             var json = await input.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(json))
             {
+                WidgetLogger.Debug("ClaudeStatusLine", "empty_input");
                 return 0;
             }
 
             var snapshot = ClaudeStatusLineParser.Parse(json, DateTimeOffset.Now);
             if (snapshot.Windows.Count == 0)
             {
+                WidgetLogger.Warning("ClaudeStatusLine", "no_supported_windows");
                 return 0;
             }
 
@@ -43,6 +46,7 @@ public static class ClaudeStatusLineBridge
             var directory = Path.GetDirectoryName(path);
             if (string.IsNullOrWhiteSpace(directory))
             {
+                WidgetLogger.Warning("ClaudeStatusLine", "snapshot_path_has_no_directory");
                 return 0;
             }
 
@@ -52,10 +56,20 @@ public static class ClaudeStatusLineBridge
             await File.WriteAllTextAsync(temporaryPath, serialized, cancellationToken)
                 .ConfigureAwait(false);
             File.Move(temporaryPath, path, overwrite: true);
+            WidgetLogger.Debug(
+                "ClaudeStatusLine",
+                "snapshot_written",
+                ("windowCount", snapshot.Windows.Count));
             return 0;
         }
-        catch
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            WidgetLogger.Warning("ClaudeStatusLine", "bridge_cancelled");
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            WidgetLogger.Error("ClaudeStatusLine", "bridge_failed", exception);
             return 0;
         }
     }
@@ -163,6 +177,7 @@ public sealed class ClaudeStatusLineLimitsDataSource : ILimitsDataSource
         }
         catch (Exception exception)
         {
+            WidgetLogger.Warning("ClaudeStatusLine", "snapshot_read_failed", exception);
             return ProviderLimitsSnapshot.Unavailable(Provider, DateTimeOffset.Now, exception.Message);
         }
     }
@@ -203,6 +218,11 @@ public sealed class ClaudeHybridLimitsDataSource : IForceRefreshableLimitsDataSo
         var cooldown = hasRecentSnapshot ? ActiveFallbackCooldown : InactiveFallbackCooldown;
         if (!CanAttemptDirect(now, cooldown))
         {
+            WidgetLogger.Debug(
+                "Claude",
+                "direct_refresh_skipped_during_cooldown",
+                ("cooldownSeconds", cooldown.TotalSeconds),
+                ("statusLineStatus", statusLineSnapshot.Status));
             return SelectBestFallback(statusLineSnapshot);
         }
 
@@ -244,6 +264,11 @@ public sealed class ClaudeHybridLimitsDataSource : IForceRefreshableLimitsDataSo
         }
         catch (Exception exception)
         {
+            WidgetLogger.Warning(
+                "Claude",
+                "direct_refresh_failed",
+                exception,
+                ("force", force));
             var bestFallback = SelectBestFallback(fallback);
             return bestFallback.Windows.Count > 0
                 ? bestFallback with { Status = LimitDataStatus.Stale, ErrorMessage = exception.Message }

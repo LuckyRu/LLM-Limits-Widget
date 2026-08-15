@@ -138,6 +138,12 @@ public sealed class LimitsCoordinator : IAsyncDisposable
             _lifetime = new CancellationTokenSource();
             _refreshLoop = RefreshLoopAsync(_lifetime.Token);
         }
+
+        WidgetLogger.Info(
+            "Limits",
+            "refresh_loop_started",
+            ("providerCount", _sources.Count),
+            ("intervalSeconds", _refreshInterval.TotalSeconds));
     }
 
     public async Task<LimitsSnapshot> RefreshAsync(
@@ -146,6 +152,7 @@ public sealed class LimitsCoordinator : IAsyncDisposable
     {
         var now = DateTimeOffset.UtcNow;
         var previous = Current;
+        WidgetLogger.Debug("Limits", "refresh_started", ("force", force));
         var results = await Task.WhenAll(_sources.Select(source =>
             ReadSourceSafelyAsync(source, previous, now, cancellationToken, force)));
         var providers = results.ToDictionary(result => result.Provider);
@@ -158,7 +165,20 @@ public sealed class LimitsCoordinator : IAsyncDisposable
             _current = snapshot;
         }
 
-        SnapshotChanged?.Invoke(snapshot);
+        try
+        {
+            SnapshotChanged?.Invoke(snapshot);
+        }
+        catch (Exception exception)
+        {
+            WidgetLogger.Error("Limits", "snapshot_consumer_failed", exception);
+        }
+
+        WidgetLogger.Debug(
+            "Limits",
+            "refresh_completed",
+            ("providerCount", providers.Count),
+            ("windowCount", providers.Values.Sum(provider => provider.Windows.Count)));
         return snapshot;
     }
 
@@ -210,6 +230,10 @@ public sealed class LimitsCoordinator : IAsyncDisposable
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
         }
+        catch (Exception exception)
+        {
+            WidgetLogger.Critical("Limits", "refresh_loop_failed", exception);
+        }
     }
 
     private static async Task<ProviderLimitsSnapshot> ReadSourceSafelyAsync(
@@ -230,6 +254,12 @@ public sealed class LimitsCoordinator : IAsyncDisposable
                     $"Source {source.Provider} returned data for {result.Provider}.");
             }
 
+            WidgetLogger.Debug(
+                "Limits",
+                "provider_refresh_succeeded",
+                ("provider", source.Provider),
+                ("status", result.Status),
+                ("windowCount", result.Windows.Count));
             return Normalize(result, now);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -238,6 +268,12 @@ public sealed class LimitsCoordinator : IAsyncDisposable
         }
         catch (Exception exception)
         {
+            WidgetLogger.Error(
+                "Limits",
+                "provider_refresh_failed",
+                exception,
+                ("provider", source.Provider),
+                ("force", force));
             if (previous.TryGetProvider(source.Provider, out var lastKnown))
             {
                 return lastKnown with

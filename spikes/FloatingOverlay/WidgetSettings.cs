@@ -101,21 +101,25 @@ public static class WidgetSettingsStore
                 return settings;
             }
         }
-        catch (IOException)
+        catch (IOException exception)
         {
             // Fall back to defaults when the file is unavailable or locked.
+            WidgetLogger.Warning("Settings", "load_failed", exception, ("reason", "io"));
         }
-        catch (JsonException)
+        catch (JsonException exception)
         {
             // Fall back to defaults when the file contains invalid JSON.
+            WidgetLogger.Warning("Settings", "load_failed", exception, ("reason", "json"));
         }
-        catch (UnauthorizedAccessException)
+        catch (UnauthorizedAccessException exception)
         {
             // Fall back to defaults when the profile directory is unavailable.
+            WidgetLogger.Warning("Settings", "load_failed", exception, ("reason", "access"));
         }
-        catch (SecurityException)
+        catch (SecurityException exception)
         {
             // Fall back to defaults when the host denies profile access.
+            WidgetLogger.Warning("Settings", "load_failed", exception, ("reason", "security"));
         }
 
         return new WidgetSettings();
@@ -141,17 +145,20 @@ public static class WidgetSettingsStore
             File.WriteAllText(temporaryPath, JsonSerializer.Serialize(settings, SerializerOptions));
             File.Move(temporaryPath, SettingsPath, true);
         }
-        catch (IOException)
+        catch (IOException exception)
         {
             // Settings are best-effort and must never prevent the widget from working.
+            WidgetLogger.Warning("Settings", "save_failed", exception, ("reason", "io"));
         }
-        catch (UnauthorizedAccessException)
+        catch (UnauthorizedAccessException exception)
         {
             // Settings are best-effort and must never prevent the widget from working.
+            WidgetLogger.Warning("Settings", "save_failed", exception, ("reason", "access"));
         }
-        catch (SecurityException)
+        catch (SecurityException exception)
         {
             // Settings are best-effort and must never prevent the widget from working.
+            WidgetLogger.Warning("Settings", "save_failed", exception, ("reason", "security"));
         }
     }
 }
