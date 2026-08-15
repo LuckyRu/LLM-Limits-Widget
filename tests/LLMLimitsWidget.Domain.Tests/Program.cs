@@ -104,6 +104,66 @@ AssertEqual(PipelinePhase.Waiting, codexAfterSuccess.Pipeline.Phase, "D-004 succ
 AssertEqual(62.5m, codexAfterSuccess.LastKnownGood!.Windows[LimitPeriod.SevenDays].Remaining.Value, "D-004 stores LKG");
 AssertEqual(1, completed.Effects.OfType<SaveProviderCacheEffect>().Count(), "D-004 schedules cache save");
 
+var claudeStatusRemaining = RemainingPercent.Create(
+    70m,
+    ProviderId.Claude,
+    TransportId.ClaudeStatusLine,
+    now).Value!;
+var claudeDirectRemaining = RemainingPercent.Create(
+    65m,
+    ProviderId.Claude,
+    TransportId.ClaudeDirectCli,
+    now).Value!;
+var statusCandidate = new LimitWindowCandidate(
+    LimitPeriod.FiveHours,
+    claudeStatusRemaining,
+    now.AddHours(2),
+    new ObservationCursor(0, 1, now, "1"),
+    new DataProvenance(TransportId.ClaudeStatusLine, now, "1"));
+var directCandidate = statusCandidate with
+{
+    Remaining = claudeDirectRemaining,
+    Provenance = new DataProvenance(TransportId.ClaudeDirectCli, now, "1")
+};
+var statusObservation = new ProviderObservationEnvelope(
+    ProviderId.Claude,
+    TransportId.ClaudeStatusLine,
+    0,
+    1,
+    "1",
+    now,
+    now,
+    ObservationCompleteness.Partial,
+    ImmutableDictionary<LimitPeriod, LimitWindowCandidate>.Empty.Add(LimitPeriod.FiveHours, statusCandidate),
+    EffectId.New());
+var statusMerge = ObservationMergePolicy.TryMerge(
+    ProviderState.Initial(ProviderId.Claude),
+    statusObservation,
+    now);
+var claudeWithStatus = ProviderState.Initial(ProviderId.Claude) with { LastKnownGood = statusMerge.Value };
+var directObservation = statusObservation with
+{
+    Transport = TransportId.ClaudeDirectCli,
+    Windows = ImmutableDictionary<LimitPeriod, LimitWindowCandidate>.Empty.Add(LimitPeriod.FiveHours, directCandidate)
+};
+var directMerge = ObservationMergePolicy.TryMerge(claudeWithStatus, directObservation, now);
+AssertEqual(65m, directMerge.Value!.Windows[LimitPeriod.FiveHours].Remaining.Value, "T-008 direct wins at equal captured time");
+var staleStatusMerge = ObservationMergePolicy.TryMerge(
+    claudeWithStatus with { LastKnownGood = directMerge.Value },
+    statusObservation with
+    {
+        CapturedAtUtc = now.AddMinutes(-1),
+        Windows = ImmutableDictionary<LimitPeriod, LimitWindowCandidate>.Empty.Add(
+            LimitPeriod.FiveHours,
+            statusCandidate with
+            {
+                Cursor = statusCandidate.Cursor with { CapturedAtUtc = now.AddMinutes(-1) },
+                Provenance = statusCandidate.Provenance with { CapturedAtUtc = now.AddMinutes(-1) }
+            })
+    },
+    now);
+AssertEqual(65m, staleStatusMerge.Value!.Windows[LimitPeriod.FiveHours].Remaining.Value, "T-009 old statusLine cannot overwrite direct");
+
 var late = AppReducer.Reduce(
     completed.State,
     new AttemptCompletedCommand(
@@ -129,7 +189,7 @@ if (failures.Count > 0)
     return 1;
 }
 
-Console.WriteLine("Domain M1: all cases passed.");
+Console.WriteLine("Domain M1/M5: all cases passed.");
 return 0;
 
 void Assert(bool condition, string name)

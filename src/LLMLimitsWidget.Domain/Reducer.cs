@@ -344,7 +344,7 @@ public static class AppReducer
         }
 
         var success = (AttemptSucceeded)command.Outcome;
-        var merged = ObservationMerger.TryMerge(provider, success.Observation, command.NowUtc);
+        var merged = ObservationMergePolicy.TryMerge(provider, success.Observation, command.NowUtc);
         if (!merged.IsSuccess)
         {
             var rejected = provider with
@@ -460,7 +460,7 @@ public static class AppReducer
         providers.SetItem(provider, update(providers[provider]));
 }
 
-internal static class ObservationMerger
+public static class ObservationMergePolicy
 {
     public static DomainResult<ProviderLimits> TryMerge(
         ProviderState current,
@@ -503,7 +503,7 @@ internal static class ObservationMerger
             }
 
             if (windows.TryGetValue(candidate.Period, out var existing)
-                && candidate.Cursor.CapturedAtUtc < existing.Cursor.CapturedAtUtc)
+                && !IsCandidateNewer(current.Provider, candidate, existing))
             {
                 continue;
             }
@@ -532,6 +532,50 @@ internal static class ObservationMerger
             observedAt,
             windows.ToImmutable()));
     }
+
+    private static bool IsCandidateNewer(
+        ProviderId provider,
+        LimitWindowCandidate candidate,
+        LimitWindow existing)
+    {
+        var capturedComparison = candidate.Cursor.CapturedAtUtc.CompareTo(existing.Cursor.CapturedAtUtc);
+        if (capturedComparison != 0)
+        {
+            return capturedComparison > 0;
+        }
+
+        var revisionComparison = CompareSourceRevision(
+            candidate.Provenance.SourceRevision,
+            existing.Provenance.SourceRevision);
+        if (revisionComparison != 0)
+        {
+            return revisionComparison > 0;
+        }
+
+        return SourcePriority(provider, candidate.Provenance.Transport)
+            > SourcePriority(provider, existing.Provenance.Transport);
+    }
+
+    private static int CompareSourceRevision(string? candidate, string? existing)
+    {
+        if (candidate is null || existing is null)
+        {
+            return 0;
+        }
+
+        if (long.TryParse(candidate, out var candidateNumber)
+            && long.TryParse(existing, out var existingNumber))
+        {
+            return candidateNumber.CompareTo(existingNumber);
+        }
+
+        return string.CompareOrdinal(candidate, existing);
+    }
+
+    private static int SourcePriority(ProviderId provider, TransportId transport) =>
+        provider == ProviderId.Claude && transport == TransportId.ClaudeDirectCli
+            ? 2
+            : 1;
 }
 
 internal sealed record InvalidObservationError(
