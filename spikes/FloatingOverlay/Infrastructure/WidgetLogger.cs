@@ -138,13 +138,16 @@ internal static class WidgetLogger
                 }
 
                 var line = JsonSerializer.Serialize(entry, JsonOptions) + Environment.NewLine;
-                var fileInfo = new FileInfo(GetActiveLogPath());
-                if (fileInfo.Exists && fileInfo.Length + line.Length > MaxFileBytes)
+                if (TryAppendLine(GetActiveLogPath(), line))
                 {
-                    Rotate(fileInfo.FullName);
+                    return;
                 }
 
-                File.AppendAllText(fileInfo.FullName, line);
+                _logDirectory = GetFallbackDirectory();
+                if (TryPrepareDirectory())
+                {
+                    _ = TryAppendLine(GetActiveLogPath(), line);
+                }
             }
         }
         catch
@@ -158,6 +161,30 @@ internal static class WidgetLogger
         "LLMLimitsWidget",
         "logs");
 
+    private static string GetFallbackDirectory() => Path.Combine(
+        Path.GetTempPath(),
+        "LLMLimitsWidget",
+        "logs");
+
+    private static bool TryAppendLine(string path, string line)
+    {
+        try
+        {
+            var fileInfo = new FileInfo(path);
+            if (fileInfo.Exists && fileInfo.Length + line.Length > MaxFileBytes)
+            {
+                Rotate(fileInfo.FullName);
+            }
+
+            File.AppendAllText(path, line);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static bool TryPrepareDirectory()
     {
         try
@@ -169,7 +196,7 @@ internal static class WidgetLogger
         {
             try
             {
-                _logDirectory = Path.Combine(Path.GetTempPath(), "LLMLimitsWidget", "logs");
+                _logDirectory = GetFallbackDirectory();
                 Directory.CreateDirectory(_logDirectory);
                 return true;
             }
