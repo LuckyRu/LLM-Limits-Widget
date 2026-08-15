@@ -11,6 +11,7 @@ internal static class LocalProcess
     {
         startInfo.UseShellExecute = false;
         startInfo.CreateNoWindow = true;
+        startInfo.WindowStyle = ProcessWindowStyle.Hidden;
         startInfo.RedirectStandardOutput = true;
         startInfo.RedirectStandardError = true;
 

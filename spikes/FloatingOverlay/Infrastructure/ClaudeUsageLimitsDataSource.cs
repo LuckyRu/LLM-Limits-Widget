@@ -27,7 +27,13 @@ public sealed class ClaudeUsageLimitsDataSource : IForceRefreshableLimitsDataSou
 
     public async Task<ProviderLimitsSnapshot> GetSnapshotAsync(CancellationToken cancellationToken)
     {
-        var startInfo = new ProcessStartInfo { FileName = _executablePath };
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = _executablePath,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden
+        };
         startInfo.ArgumentList.Add("-p");
         startInfo.ArgumentList.Add("/usage");
         startInfo.ArgumentList.Add("--output-format");

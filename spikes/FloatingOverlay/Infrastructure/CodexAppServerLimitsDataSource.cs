@@ -31,7 +31,10 @@ public sealed class CodexAppServerLimitsDataSource : IForceRefreshableLimitsData
         var startInfo = new ProcessStartInfo
         {
             FileName = _executablePath,
-            Arguments = "app-server --stdio"
+            Arguments = "app-server --stdio",
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden
         };
         var codexHome = Environment.GetEnvironmentVariable("CODEX_HOME");
         if (string.IsNullOrWhiteSpace(codexHome))

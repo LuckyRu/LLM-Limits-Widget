@@ -173,13 +173,14 @@ public sealed class ClaudeHybridLimitsDataSource : IForceRefreshableLimitsDataSo
     private static readonly TimeSpan ActiveFallbackCooldown = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan InactiveFallbackCooldown = TimeSpan.FromMinutes(15);
     private readonly ClaudeStatusLineLimitsDataSource _statusLine;
-    private readonly ClaudeUsageLimitsDataSource _direct;
+    private readonly IForceRefreshableLimitsDataSource _direct;
     private readonly object _sync = new();
     private DateTimeOffset? _lastDirectAttempt;
+    private ProviderLimitsSnapshot? _lastDirectSnapshot;
 
     public ClaudeHybridLimitsDataSource(
         ClaudeStatusLineLimitsDataSource? statusLine = null,
-        ClaudeUsageLimitsDataSource? direct = null)
+        IForceRefreshableLimitsDataSource? direct = null)
     {
         _statusLine = statusLine ?? new ClaudeStatusLineLimitsDataSource();
         _direct = direct ?? new ClaudeUsageLimitsDataSource();
@@ -202,7 +203,7 @@ public sealed class ClaudeHybridLimitsDataSource : IForceRefreshableLimitsDataSo
         var cooldown = hasRecentSnapshot ? ActiveFallbackCooldown : InactiveFallbackCooldown;
         if (!CanAttemptDirect(now, cooldown))
         {
-            return statusLineSnapshot;
+            return SelectBestFallback(statusLineSnapshot);
         }
 
         return await ReadDirectWithFallbackAsync(statusLineSnapshot, cancellationToken)
@@ -214,18 +215,28 @@ public sealed class ClaudeHybridLimitsDataSource : IForceRefreshableLimitsDataSo
         MarkDirectAttempt(DateTimeOffset.Now);
         return await ReadDirectWithFallbackAsync(
                 await _statusLine.GetSnapshotAsync(cancellationToken).ConfigureAwait(false),
-                cancellationToken)
+                cancellationToken,
+                force: true)
             .ConfigureAwait(false);
     }
 
     private async Task<ProviderLimitsSnapshot> ReadDirectWithFallbackAsync(
         ProviderLimitsSnapshot fallback,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool force = false)
     {
         try
         {
             MarkDirectAttempt(DateTimeOffset.Now);
-            return await _direct.GetSnapshotAsync(cancellationToken).ConfigureAwait(false);
+            var snapshot = force
+                ? await _direct.ForceRefreshAsync(cancellationToken).ConfigureAwait(false)
+                : await _direct.GetSnapshotAsync(cancellationToken).ConfigureAwait(false);
+            lock (_sync)
+            {
+                _lastDirectSnapshot = snapshot;
+            }
+
+            return snapshot;
         }
         catch (OperationCanceledException)
         {
@@ -233,10 +244,33 @@ public sealed class ClaudeHybridLimitsDataSource : IForceRefreshableLimitsDataSo
         }
         catch (Exception exception)
         {
-            return fallback.Windows.Count > 0
-                ? fallback with { Status = LimitDataStatus.Stale, ErrorMessage = exception.Message }
-                : fallback with { Status = LimitDataStatus.Unavailable, ErrorMessage = exception.Message };
+            var bestFallback = SelectBestFallback(fallback);
+            return bestFallback.Windows.Count > 0
+                ? bestFallback with { Status = LimitDataStatus.Stale, ErrorMessage = exception.Message }
+                : bestFallback with { Status = LimitDataStatus.Unavailable, ErrorMessage = exception.Message };
         }
+    }
+
+    private ProviderLimitsSnapshot SelectBestFallback(ProviderLimitsSnapshot statusLineSnapshot)
+    {
+        ProviderLimitsSnapshot? directSnapshot;
+        lock (_sync)
+        {
+            directSnapshot = _lastDirectSnapshot;
+        }
+
+        if (directSnapshot is not null
+            && (statusLineSnapshot.Windows.Count == 0
+                || directSnapshot.ObservedAt > statusLineSnapshot.ObservedAt))
+        {
+            return directSnapshot with
+            {
+                Status = LimitDataStatus.Stale,
+                ErrorMessage = "Claude statusLine is unavailable; showing the last direct snapshot."
+            };
+        }
+
+        return statusLineSnapshot;
     }
 
     private bool CanAttemptDirect(DateTimeOffset now, TimeSpan cooldown)

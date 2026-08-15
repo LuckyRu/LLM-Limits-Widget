@@ -91,6 +91,26 @@ finally
     File.Delete(bridgeSnapshotPath);
 }
 
+var hybridDirectSnapshot = new ProviderLimitsSnapshot(
+    LimitProviderId.Claude,
+    DateTimeOffset.Now,
+    new[]
+    {
+        new LimitWindowSnapshot(LimitWindowKind.FiveHour, "5h", 81, DateTimeOffset.Now.AddHours(1)),
+        new LimitWindowSnapshot(LimitWindowKind.SevenDay, "7d", 50, DateTimeOffset.Now.AddDays(1))
+    });
+var hybridDirect = new FixedForceSource(hybridDirectSnapshot);
+var hybrid = new ClaudeHybridLimitsDataSource(
+    new ClaudeStatusLineLimitsDataSource(
+        Path.Combine(Path.GetTempPath(), $"missing-statusline-{Guid.NewGuid():N}.json")),
+    hybridDirect);
+var hybridFirst = await hybrid.GetSnapshotAsync(CancellationToken.None);
+var hybridSecond = await hybrid.GetSnapshotAsync(CancellationToken.None);
+AssertEqual(LimitDataStatus.Fresh, hybridFirst.Status, "hybrid uses direct snapshot when statusLine is absent");
+AssertEqual(LimitDataStatus.Stale, hybridSecond.Status, "hybrid keeps last direct snapshot during cooldown");
+AssertEqual(2, hybridSecond.Windows.Count, "hybrid stale fallback keeps all Claude windows");
+AssertEqual(1, hybridDirect.ReadCount, "hybrid cooldown prevents repeated direct calls");
+
 var updates = 0;
 var healthySource = new FixedSource(
     LimitProviderId.Codex,
@@ -133,7 +153,7 @@ if (failures.Count > 0)
     return 1;
 }
 
-Console.WriteLine("Limits domain: 23 cases passed.");
+Console.WriteLine("Limits domain: 27 cases passed.");
 return 0;
 
 static async Task RunRealProviderSmokeAsync()
@@ -188,5 +208,24 @@ sealed class FixedSource(
         }
 
         return Task.FromResult(snapshot);
+    }
+}
+
+sealed class FixedForceSource(ProviderLimitsSnapshot snapshot) : IForceRefreshableLimitsDataSource
+{
+    public int ReadCount { get; private set; }
+
+    public LimitProviderId Provider => snapshot.Provider;
+
+    public Task<ProviderLimitsSnapshot> GetSnapshotAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ReadCount++;
+        return Task.FromResult(snapshot);
+    }
+
+    public Task<ProviderLimitsSnapshot> ForceRefreshAsync(CancellationToken cancellationToken)
+    {
+        return GetSnapshotAsync(cancellationToken);
     }
 }
