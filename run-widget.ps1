@@ -25,17 +25,14 @@ if (-not (Test-Path -LiteralPath $executablePath)) {
     throw "Widget executable was not found: $executablePath"
 }
 
-$arguments = @()
-if ($NoGhost) {
-    $arguments += "--no-ghost"
-}
-
 $startInfo = @{
     FilePath = $executablePath
-    ArgumentList = $arguments
     WorkingDirectory = $outputDirectory
     WindowStyle = "Hidden"
     PassThru = $true
+}
+if ($NoGhost) {
+    $startInfo.ArgumentList = @("--no-ghost")
 }
 $process = Start-Process @startInfo
 
