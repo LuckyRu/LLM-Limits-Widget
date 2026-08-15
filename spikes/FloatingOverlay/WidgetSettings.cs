@@ -89,37 +89,36 @@ public static class WidgetSettingsStore
         "LLMLimitsWidget",
         "widget-settings.json");
 
+    private static string FallbackSettingsPath => Path.Combine(
+        Path.GetTempPath(),
+        "LLMLimitsWidget",
+        "widget-settings.json");
+
     public static WidgetSettings Load()
     {
-        try
+        foreach (var path in new[] { SettingsPath, FallbackSettingsPath })
         {
-            if (File.Exists(SettingsPath))
+            try
             {
-                var settings = JsonSerializer.Deserialize<WidgetSettings>(
-                    File.ReadAllText(SettingsPath), SerializerOptions) ?? new WidgetSettings();
-                settings.Normalize();
-                return settings;
+                if (File.Exists(path))
+                {
+                    var settings = JsonSerializer.Deserialize<WidgetSettings>(
+                        File.ReadAllText(path), SerializerOptions) ?? new WidgetSettings();
+                    settings.Normalize();
+                    return settings;
+                }
             }
-        }
-        catch (IOException exception)
-        {
-            // Fall back to defaults when the file is unavailable or locked.
-            WidgetLogger.Warning("Settings", "load_failed", exception, ("reason", "io"));
-        }
-        catch (JsonException exception)
-        {
-            // Fall back to defaults when the file contains invalid JSON.
-            WidgetLogger.Warning("Settings", "load_failed", exception, ("reason", "json"));
-        }
-        catch (UnauthorizedAccessException exception)
-        {
-            // Fall back to defaults when the profile directory is unavailable.
-            WidgetLogger.Warning("Settings", "load_failed", exception, ("reason", "access"));
-        }
-        catch (SecurityException exception)
-        {
-            // Fall back to defaults when the host denies profile access.
-            WidgetLogger.Warning("Settings", "load_failed", exception, ("reason", "security"));
+            catch (Exception exception) when (exception is IOException
+                                              or JsonException
+                                              or UnauthorizedAccessException
+                                              or SecurityException)
+            {
+                WidgetLogger.Warning(
+                    "Settings",
+                    "load_failed",
+                    exception,
+                    ("location", path == SettingsPath ? "localAppData" : "temp"));
+            }
         }
 
         return new WidgetSettings();
@@ -127,38 +126,58 @@ public static class WidgetSettingsStore
 
     public static void Save(WidgetSettings settings)
     {
+        if (TrySave(SettingsPath, settings, out var primaryFailure))
+        {
+            return;
+        }
+
+        if (TrySave(FallbackSettingsPath, settings, out _))
+        {
+            WidgetLogger.Info(
+                "Settings",
+                "save_fallback_used",
+                ("reason", primaryFailure?.GetType().Name ?? "primary_unavailable"));
+            return;
+        }
+
+        if (primaryFailure is not null)
+        {
+            WidgetLogger.Warning("Settings", "save_failed", primaryFailure);
+        }
+    }
+
+    private static bool TrySave(
+        string path,
+        WidgetSettings settings,
+        out Exception? failure)
+    {
+        failure = null;
         try
         {
             settings.Normalize();
             if (!settings.CanPersist)
             {
-                return;
+                return true;
             }
-            var directory = Path.GetDirectoryName(SettingsPath);
+
+            var directory = Path.GetDirectoryName(path);
             if (directory is null)
             {
-                return;
+                return false;
             }
 
             Directory.CreateDirectory(directory);
-            var temporaryPath = $"{SettingsPath}.{Environment.ProcessId}.tmp";
+            var temporaryPath = $"{path}.{Environment.ProcessId}.tmp";
             File.WriteAllText(temporaryPath, JsonSerializer.Serialize(settings, SerializerOptions));
-            File.Move(temporaryPath, SettingsPath, true);
+            File.Move(temporaryPath, path, true);
+            return true;
         }
-        catch (IOException exception)
+        catch (Exception exception) when (exception is IOException
+                                          or UnauthorizedAccessException
+                                          or SecurityException)
         {
-            // Settings are best-effort and must never prevent the widget from working.
-            WidgetLogger.Warning("Settings", "save_failed", exception, ("reason", "io"));
-        }
-        catch (UnauthorizedAccessException exception)
-        {
-            // Settings are best-effort and must never prevent the widget from working.
-            WidgetLogger.Warning("Settings", "save_failed", exception, ("reason", "access"));
-        }
-        catch (SecurityException exception)
-        {
-            // Settings are best-effort and must never prevent the widget from working.
-            WidgetLogger.Warning("Settings", "save_failed", exception, ("reason", "security"));
+            failure = exception;
+            return false;
         }
     }
 }
