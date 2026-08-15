@@ -10,6 +10,7 @@ bin/
 obj/
 dist/
 build/
+artifacts/
 
 # Node / local tooling
 node_modules/

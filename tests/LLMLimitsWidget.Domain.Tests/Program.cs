@@ -214,6 +214,35 @@ AssertEqual(
     70m,
     pushed.State.Providers[ProviderId.Claude].LastKnownGood!.Windows[LimitPeriod.FiveHours].Remaining.Value,
     "T-003 statusLine push enters the single-writer store");
+var waitingClaude = AppState.Empty with
+{
+    Lifecycle = AppLifecycleState.Running,
+    Providers = AppState.Empty.Providers.SetItem(
+        ProviderId.Claude,
+        ProviderState.Initial(ProviderId.Claude) with
+        {
+            Pipeline = ProviderState.Initial(ProviderId.Claude).Pipeline with { Phase = PipelinePhase.Waiting }
+        })
+};
+var statusLineDeferred = AppReducer.Reduce(
+    waitingClaude,
+    new ObservationReceivedCommand(ProviderId.Claude, statusObservation, now, Guid.NewGuid()));
+var reconciliationWake = statusLineDeferred.Effects.OfType<ScheduleWakeEffect>().Single();
+AssertEqual(
+    now.AddMinutes(15),
+    reconciliationWake.DueAtUtc,
+    "T-013 statusLine defers expensive Claude direct reconciliation");
+AssertEqual(
+    PipelinePhase.Waiting,
+    statusLineDeferred.State.Providers[ProviderId.Claude].Pipeline.Phase,
+    "T-013 statusLine keeps Claude pipeline waiting");
+var staleReconciliationWake = AppReducer.Reduce(
+    statusLineDeferred.State,
+    new WakeElapsedCommand(ProviderId.Claude, WakeId.New(), now.AddMinutes(5), Guid.NewGuid()));
+AssertEqual(
+    statusLineDeferred.State.Revision,
+    staleReconciliationWake.State.Revision,
+    "T-013 stale direct wake is ignored after statusLine push");
 var invalidPush = statusObservation with
 {
     Windows = ImmutableDictionary<LimitPeriod, LimitWindowCandidate>.Empty.Add(

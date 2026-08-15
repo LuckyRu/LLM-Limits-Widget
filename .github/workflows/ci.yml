@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+      - name: Test domain
+        run: dotnet run --project tests/LLMLimitsWidget.Domain.Tests/LLMLimitsWidget.Domain.Tests.csproj -p:UseSharedCompilation=false
+      - name: Test application
+        run: dotnet run --project tests/LLMLimitsWidget.Application.Tests/LLMLimitsWidget.Application.Tests.csproj -p:UseSharedCompilation=false
+      - name: Test Codex provider
+        run: dotnet run --project tests/LLMLimitsWidget.Provider.Codex.Tests/LLMLimitsWidget.Provider.Codex.Tests.csproj -p:UseSharedCompilation=false
+      - name: Test Claude provider
+        run: dotnet run --project tests/LLMLimitsWidget.Provider.Claude.Tests/LLMLimitsWidget.Provider.Claude.Tests.csproj -p:UseSharedCompilation=false
+      - name: Test Windows infrastructure
+        run: dotnet run --project tests/LLMLimitsWidget.Infrastructure.Windows.Tests/LLMLimitsWidget.Infrastructure.Windows.Tests.csproj -p:UseSharedCompilation=false
+      - name: Test presentation
+        run: dotnet run --project tests/LLMLimitsWidget.Presentation.Tests/LLMLimitsWidget.Presentation.Tests.csproj -p:UseSharedCompilation=false
+      - name: Test architecture boundary
+        run: dotnet run --project tests/LLMLimitsWidget.Architecture.Tests/LLMLimitsWidget.Architecture.Tests.csproj -p:UseSharedCompilation=false
+      - name: Test Claude statusLine bridge
+        run: dotnet run --project tests/LLMLimitsWidget.ClaudeStatusLineBridge.Tests/LLMLimitsWidget.ClaudeStatusLineBridge.Tests.csproj -p:UseSharedCompilation=false
+      - name: Publish portable Windows build
+        run: dotnet publish spikes/FloatingOverlay/FloatingOverlay.csproj --configuration Release --runtime win-x64 --self-contained false --output artifacts/publish/win-x64 -p:UseSharedCompilation=false
+      - name: Verify deployable bridge
+        shell: pwsh
+        run: if (-not (Test-Path artifacts/publish/win-x64/claude-statusline-bridge/LLMLimitsWidget.ClaudeStatusLineBridge.exe)) { throw 'Claude statusLine bridge is missing from publish output.' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LLM-Limits-Widget-win-x64
+          path: artifacts/publish/win-x64
+          if-no-files-found: error

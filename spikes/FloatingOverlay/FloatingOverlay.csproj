@@ -21,12 +21,20 @@
   <Target Name="BuildClaudeStatusLineBridge" AfterTargets="Build">
     <MSBuild Projects="$(MSBuildProjectDirectory)\..\..\src\LLMLimitsWidget.ClaudeStatusLineBridge\LLMLimitsWidget.ClaudeStatusLineBridge.csproj"
              Targets="Build"
-             Properties="Configuration=$(Configuration);UseSharedCompilation=$(UseSharedCompilation)" />
+             Properties="Configuration=$(Configuration);UseSharedCompilation=$(UseSharedCompilation);RuntimeIdentifier=;SelfContained=false" />
     <ItemGroup>
       <ClaudeStatusLineBridgeFiles Include="$(MSBuildProjectDirectory)\..\..\src\LLMLimitsWidget.ClaudeStatusLineBridge\bin\$(Configuration)\net10.0-windows\**\*" />
     </ItemGroup>
     <Copy SourceFiles="@(ClaudeStatusLineBridgeFiles)"
           DestinationFiles="@(ClaudeStatusLineBridgeFiles->'$(OutDir)claude-statusline-bridge\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="CopyClaudeStatusLineBridgeToPublish" AfterTargets="Publish" DependsOnTargets="BuildClaudeStatusLineBridge">
+    <ItemGroup>
+      <PublishedClaudeStatusLineBridgeFiles Include="$(MSBuildProjectDirectory)\..\..\src\LLMLimitsWidget.ClaudeStatusLineBridge\bin\$(Configuration)\net10.0-windows\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(PublishedClaudeStatusLineBridgeFiles)"
+          DestinationFiles="@(PublishedClaudeStatusLineBridgeFiles->'$(PublishDir)claude-statusline-bridge\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true" />
   </Target>
 </Project>

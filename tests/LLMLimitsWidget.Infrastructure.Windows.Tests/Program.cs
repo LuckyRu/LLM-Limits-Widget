@@ -27,6 +27,35 @@ finally
     Environment.SetEnvironmentVariable("CLAUDE_CODE_PATH", previousClaudePath);
 }
 
+var autoStartDirectory = Path.Combine(Path.GetTempPath(), $"llm-limits-autostart-{Guid.NewGuid():N}");
+try
+{
+    Directory.CreateDirectory(autoStartDirectory);
+    var executablePath = Path.Combine(autoStartDirectory, "LLMLimitsWidget.FloatingOverlay.exe");
+    await File.WriteAllTextAsync(executablePath, string.Empty);
+    var registry = new MemoryStartupRegistry();
+    var autoStart = new WindowsAutoStartRegistration(registry);
+    AssertEqual(
+        AutoStartRegistrationState.Enabled,
+        autoStart.SetEnabled(true, executablePath).State,
+        "I-000 registers current-user autostart");
+    Assert(registry.Value!.Contains("--autostart", StringComparison.Ordinal), "I-000 passes autostart argument");
+    AssertEqual(
+        AutoStartRegistrationState.Disabled,
+        autoStart.SetEnabled(false, executablePath).State,
+        "I-000 removes widget-owned autostart");
+    registry.Value = "\"C:\\other.exe\"";
+    autoStart.SetEnabled(false, executablePath);
+    AssertEqual("\"C:\\other.exe\"", registry.Value, "I-000 preserves an unrelated Run entry");
+}
+finally
+{
+    if (Directory.Exists(autoStartDirectory))
+    {
+        Directory.Delete(autoStartDirectory, recursive: true);
+    }
+}
+
 var cacheDirectory = Path.Combine(Path.GetTempPath(), $"llm-limits-cache-{Guid.NewGuid():N}");
 try
 {
@@ -248,4 +277,15 @@ sealed class RecordingCommandSink : IApplicationCommandSink
 sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
 {
     public override DateTimeOffset GetUtcNow() => now;
+}
+
+sealed class MemoryStartupRegistry : IWindowsStartupRegistry
+{
+    public string? Value { get; set; }
+
+    public string? Get(string valueName) => Value;
+
+    public void Set(string valueName, string command) => Value = command;
+
+    public void Delete(string valueName) => Value = null;
 }

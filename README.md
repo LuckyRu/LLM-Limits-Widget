@@ -45,6 +45,16 @@
 
 `dotnet run` для запуска виджета не используется: он оставляет процесс под оболочкой `dotnet` и в ограниченном окружении может не иметь доступа к пользовательским настройкам, логам и трей-сессии.
 
+## Релизная сборка
+
+Portable Windows-релиз собирается так:
+
+```powershell
+.\scripts\publish-release.ps1
+```
+
+Результат появляется в `artifacts\publish\win-x64`; он включает bridge Claude statusLine. Если установлен Inno Setup 6, добавить `-BuildInstaller`, чтобы собрать установщик. Для опубликованных `v*` тегов GitHub Actions создаёт ZIP и installer автоматически.
+
 ## Рабочее название
 
 Floating LLM Limits Widget. Название не финализировано.

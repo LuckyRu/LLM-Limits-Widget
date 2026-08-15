@@ -24,6 +24,17 @@ public static class ProviderRefreshSchedule
         _ => TimeSpan.FromMinutes(5)
     };
 
+    /// <summary>
+    /// A fresh Claude Code statusLine is a low-cost push signal. Keep direct
+    /// CLI as a reconciliation/fallback path, not a second five-minute poll
+    /// while the interactive session is actively providing observations.
+    /// </summary>
+    public static TimeSpan StatusLineReconciliationInterval(ProviderId provider) => provider switch
+    {
+        ProviderId.Claude => TimeSpan.FromMinutes(15),
+        _ => HealthyInterval(provider)
+    };
+
     public static TimeSpan RetryDelay(RetryDisposition retry, int consecutiveFailures) => retry switch
     {
         RetryDisposition.Immediate => TimeSpan.FromSeconds(1),

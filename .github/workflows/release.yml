@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (for example 0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+      - name: Test all projects
+        shell: pwsh
+        run: |
+          $projects = @(
+            'tests/LLMLimitsWidget.Domain.Tests/LLMLimitsWidget.Domain.Tests.csproj',
+            'tests/LLMLimitsWidget.Application.Tests/LLMLimitsWidget.Application.Tests.csproj',
+            'tests/LLMLimitsWidget.Provider.Codex.Tests/LLMLimitsWidget.Provider.Codex.Tests.csproj',
+            'tests/LLMLimitsWidget.Provider.Claude.Tests/LLMLimitsWidget.Provider.Claude.Tests.csproj',
+            'tests/LLMLimitsWidget.Infrastructure.Windows.Tests/LLMLimitsWidget.Infrastructure.Windows.Tests.csproj',
+            'tests/LLMLimitsWidget.Presentation.Tests/LLMLimitsWidget.Presentation.Tests.csproj',
+            'tests/LLMLimitsWidget.Architecture.Tests/LLMLimitsWidget.Architecture.Tests.csproj',
+            'tests/LLMLimitsWidget.ClaudeStatusLineBridge.Tests/LLMLimitsWidget.ClaudeStatusLineBridge.Tests.csproj'
+          )
+          $projects | ForEach-Object { dotnet run --project $_ -p:UseSharedCompilation=false; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }
+      - name: Publish portable build
+        run: dotnet publish spikes/FloatingOverlay/FloatingOverlay.csproj --configuration Release --runtime win-x64 --self-contained false --output artifacts/publish/win-x64 -p:UseSharedCompilation=false
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress --yes
+      - name: Build installer
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.version || github.ref_name }}
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$env:RELEASE_VERSION" packaging/LLMLimitsWidget.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Create portable ZIP
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.version || github.ref_name }}
+        run: Compress-Archive -Path artifacts/publish/win-x64/* -DestinationPath "artifacts/LLM-Limits-Widget-$env:RELEASE_VERSION-win-x64.zip"
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version || github.ref_name }}
+        run: gh release create $env:RELEASE_VERSION artifacts/installer/*.exe artifacts/*.zip --title "LLM Limits Widget $env:RELEASE_VERSION" --generate-notes

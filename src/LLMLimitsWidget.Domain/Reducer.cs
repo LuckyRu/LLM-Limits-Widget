@@ -498,21 +498,45 @@ public static class AppReducer
             return NoChange(state);
         }
 
+        var shouldDeferClaudeDirect = command.Provider == ProviderId.Claude
+            && command.Observation.Transport == TransportId.ClaudeStatusLine
+            && provider.Pipeline.Phase is PipelinePhase.Waiting or PipelinePhase.BackingOff;
+        var reconciliationWake = shouldDeferClaudeDirect ? WakeId.New() : (WakeId?)null;
+        var reconciliationDueAtUtc = shouldDeferClaudeDirect
+            ? command.NowUtc.Add(ProviderRefreshSchedule.StatusLineReconciliationInterval(command.Provider))
+            : (DateTimeOffset?)null;
         var updated = provider with
         {
             LastKnownGood = merged.Value,
             Freshness = DataFreshness.Fresh,
             AggregateHealth = ProviderHealth.Healthy,
+            Pipeline = shouldDeferClaudeDirect
+                ? provider.Pipeline with
+                {
+                    Phase = PipelinePhase.Waiting,
+                    NextWakeAtUtc = reconciliationDueAtUtc,
+                    ScheduledWake = reconciliationWake
+                }
+                : provider.Pipeline,
             Transports = provider.Transports.SetItem(command.Observation.Transport, healthyTransport),
-            LastSuccessAtUtc = command.NowUtc
+            LastSuccessAtUtc = command.NowUtc,
+            NextAttemptAtUtc = reconciliationDueAtUtc ?? provider.NextAttemptAtUtc
         };
+        var effects = ImmutableArray.CreateBuilder<DomainEffect>();
+        effects.Add(new SaveProviderCacheEffect(EffectId.New(), command.Provider, merged.Value!));
+        if (reconciliationWake is { } wake && reconciliationDueAtUtc is { } dueAtUtc)
+        {
+            effects.Add(new ScheduleWakeEffect(EffectId.New(), command.Provider, wake, dueAtUtc));
+        }
         return ReplaceProvider(
             state,
             command.Provider,
             updated,
-            [new SaveProviderCacheEffect(EffectId.New(), command.Provider, merged.Value!)],
+            effects,
             command.CorrelationId,
-            "provider_push_observation_accepted");
+            shouldDeferClaudeDirect
+                ? "claude_statusline_reconciliation_deferred"
+                : "provider_push_observation_accepted");
     }
 
     private static DomainTransition ApplyAttemptFailure(

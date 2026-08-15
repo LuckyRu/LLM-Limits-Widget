@@ -7,7 +7,7 @@ namespace LLMLimitsWidget.FloatingOverlay;
 
 public sealed class WidgetSettings
 {
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 4;
 
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public LayoutOrientation Orientation { get; set; } = LayoutOrientation.Vertical;
@@ -15,6 +15,7 @@ public sealed class WidgetSettings
     public double SurfaceOpacity { get; set; } = 1.0;
     public double CornerRadius { get; set; } = 18;
     public bool GhostModeEnabled { get; set; }
+    public bool AutoStartEnabled { get; set; }
     public WindowPlacementSettings? Placement { get; set; }
 
     [JsonIgnore]

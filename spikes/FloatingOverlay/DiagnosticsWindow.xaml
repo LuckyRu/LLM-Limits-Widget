@@ -1,0 +1,61 @@
+<Window x:Class="LLMLimitsWidget.FloatingOverlay.DiagnosticsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="LLM Limits — диагностика"
+        Width="650"
+        Height="500"
+        MinWidth="560"
+        MinHeight="380"
+        WindowStartupLocation="CenterScreen"
+        ShowInTaskbar="False"
+        Background="#171D24"
+        Foreground="#F1F5F7">
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <DockPanel Grid.Row="0" Margin="0,0,0,14">
+            <StackPanel DockPanel.Dock="Left">
+                <TextBlock Text="Состояние источников" FontSize="18" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding UpdatedAtText}" Style="{StaticResource TinyLabel}" Margin="0,4,0,0" />
+            </StackPanel>
+            <Button DockPanel.Dock="Right" Content="↻" Style="{StaticResource IconButton}"
+                    ToolTip="Обновить данные" Click="Refresh_Click" />
+        </DockPanel>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <Border Background="#20262C" BorderBrush="#46525C" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,10"
+                        DataContext="{Binding Codex}">
+                    <StackPanel>
+                        <TextBlock Text="Codex" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource CodexBrush}" />
+                        <TextBlock Text="{Binding Summary}" Margin="0,7,0,0" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding Schedule}" Style="{StaticResource TinyLabel}" Margin="0,4,0,0" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding Windows}" Style="{StaticResource TinyLabel}" Margin="0,4,0,0" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding Transports}" Style="{StaticResource TinyLabel}" Margin="0,7,0,0" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding Persistence}" Style="{StaticResource TinyLabel}" Margin="0,7,0,0" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+                <Border Background="#20262C" BorderBrush="#46525C" BorderThickness="1" CornerRadius="8" Padding="12"
+                        DataContext="{Binding Claude}">
+                    <StackPanel>
+                        <TextBlock Text="Claude" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource ClaudeBrush}" />
+                        <TextBlock Text="{Binding Summary}" Margin="0,7,0,0" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding Schedule}" Style="{StaticResource TinyLabel}" Margin="0,4,0,0" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding Windows}" Style="{StaticResource TinyLabel}" Margin="0,4,0,0" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding Transports}" Style="{StaticResource TinyLabel}" Margin="0,7,0,0" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding Persistence}" Style="{StaticResource TinyLabel}" Margin="0,7,0,0" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+
+        <DockPanel Grid.Row="2" Margin="0,14,0,0">
+            <Button Content="Открыть логи" Click="OpenLogs_Click" Padding="12,6" />
+            <Button Content="Закрыть" DockPanel.Dock="Right" Click="Close_Click" Padding="12,6" />
+        </DockPanel>
+    </Grid>
+</Window>

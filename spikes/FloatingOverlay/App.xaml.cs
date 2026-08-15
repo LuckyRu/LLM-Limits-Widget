@@ -18,6 +18,9 @@ public partial class App : System.Windows.Application
     private Stream? _trayIconStream;
     private FormsToolStripMenuItem? _ghostModeMenuItem;
     private FormsToolStripMenuItem? _claudeFastUpdatesMenuItem;
+    private FormsToolStripMenuItem? _autoStartMenuItem;
+    private readonly WindowsAutoStartRegistration _autoStartRegistration = new();
+    private DiagnosticsWindow? _diagnosticsWindow;
     private Mutex? _singleInstanceMutex;
     private bool _singleInstanceMutexOwned;
     private IntPtr _foregroundBeforeTray;
@@ -53,6 +56,8 @@ public partial class App : System.Windows.Application
 
         var suppressPersistedGhost = e.Args.Any(
             argument => string.Equals(argument, "--no-ghost", StringComparison.OrdinalIgnoreCase));
+        var startedFromAutoStart = e.Args.Any(
+            argument => string.Equals(argument, "--autostart", StringComparison.OrdinalIgnoreCase));
         MainWindow = new MainWindow(suppressPersistedGhost, architectureV2Enabled);
 
         if (architectureV2Enabled)
@@ -123,6 +128,10 @@ public partial class App : System.Windows.Application
             _claudeFastUpdatesMenuItem = new FormsToolStripMenuItem("Claude: восстановить быстрые обновления");
             _claudeFastUpdatesMenuItem.Click += (_, _) => ConfigureClaudeFastUpdates();
             _trayMenu.Items.Add(_claudeFastUpdatesMenuItem);
+            _autoStartMenuItem = new FormsToolStripMenuItem("Запускать с Windows") { CheckOnClick = false };
+            _autoStartMenuItem.Click += (_, _) => ToggleAutoStart();
+            _trayMenu.Items.Add(_autoStartMenuItem);
+            _trayMenu.Items.Add(new FormsToolStripMenuItem("Диагностика источников", null, (_, _) => ShowDiagnostics()));
             _trayMenu.Items.Add(new FormsToolStripMenuItem("Показать виджет", null, (_, _) => ShowWidget()));
             _trayMenu.Items.Add(new FormsToolStripMenuItem("Сбросить позицию", null, (_, _) => ResetWidgetPosition()));
             _trayMenu.Items.Add(new FormsToolStripMenuItem("Выйти", null, (_, _) => ExitApplication()));
@@ -159,6 +168,7 @@ public partial class App : System.Windows.Application
             {
                 UpdateGhostMenuStatus(initialWidget, initialWidget.LastGhostModeResult);
             };
+            SynchronizeAutoStart(initialWidget);
         }
 
         MainWindow.Show();
@@ -170,7 +180,9 @@ public partial class App : System.Windows.Application
             }
             UpdateGhostMenuStatus(loadedWidget, loadedWidget.LastGhostModeResult);
         }
-        if (MainWindow is MainWindow shownWidget && !shownWidget.IsGhostInputSuppressed)
+        if (MainWindow is MainWindow shownWidget
+            && !shownWidget.IsGhostInputSuppressed
+            && !startedFromAutoStart)
         {
             MainWindow.Activate();
         }
@@ -196,6 +208,7 @@ public partial class App : System.Windows.Application
         _trayIconAsset?.Dispose();
         _trayIconStream?.Dispose();
         _trayMenu?.Dispose();
+        _diagnosticsWindow?.Close();
         ReleaseSingleInstance();
         base.OnExit(e);
     }
@@ -259,6 +272,66 @@ public partial class App : System.Windows.Application
                 _ => "Could not configure. Open widget logs for details."
             },
             System.Windows.Forms.ToolTipIcon.Info);
+    }
+
+    private void ShowDiagnostics()
+    {
+        if (_architectureV2 is null)
+        {
+            return;
+        }
+
+        if (_diagnosticsWindow is { IsVisible: true })
+        {
+            _diagnosticsWindow.Activate();
+            return;
+        }
+
+        _diagnosticsWindow = new DiagnosticsWindow(_architectureV2)
+        {
+            Owner = MainWindow
+        };
+        _diagnosticsWindow.Closed += (_, _) => _diagnosticsWindow = null;
+        _diagnosticsWindow.Show();
+        _diagnosticsWindow.Activate();
+    }
+
+    private void SynchronizeAutoStart(MainWindow widget)
+    {
+        var result = _autoStartRegistration.SetEnabled(widget.AutoStartEnabled, Environment.ProcessPath ?? string.Empty);
+        UpdateAutoStartMenu(result.IsEnabled);
+        WidgetLogger.Info("AutoStart", "synchronized", ("state", result.State));
+    }
+
+    private void ToggleAutoStart()
+    {
+        if (MainWindow is not MainWindow widget)
+        {
+            return;
+        }
+
+        var desired = !widget.AutoStartEnabled;
+        var result = _autoStartRegistration.SetEnabled(desired, Environment.ProcessPath ?? string.Empty);
+        if (result.State is AutoStartRegistrationState.Enabled or AutoStartRegistrationState.Disabled)
+        {
+            widget.SetAutoStartEnabled(desired);
+        }
+
+        UpdateAutoStartMenu(result.IsEnabled);
+        WidgetLogger.Info("AutoStart", "toggle_requested", ("desired", desired), ("state", result.State));
+        _trayIcon?.ShowBalloonTip(
+            3_000,
+            "LLM Limits Widget",
+            result.Detail,
+            System.Windows.Forms.ToolTipIcon.Info);
+    }
+
+    private void UpdateAutoStartMenu(bool enabled)
+    {
+        if (_autoStartMenuItem is not null)
+        {
+            _autoStartMenuItem.Checked = enabled;
+        }
     }
 
     private bool TryAcquireSingleInstance()

@@ -430,6 +430,14 @@ public partial class MainWindow : Window
 
     public bool IsGhostModeEnabled => _ghostModeController.IsEnabled;
 
+    internal bool AutoStartEnabled => _settings.AutoStartEnabled;
+
+    internal void SetAutoStartEnabled(bool enabled)
+    {
+        _settings.AutoStartEnabled = enabled;
+        PersistSettings();
+    }
+
     internal bool GhostCleanupRequired => _ghostModeController.RequiresCleanup;
 
     internal bool IsGhostInputSuppressed => _ghostModeController.IsInputSuppressed;

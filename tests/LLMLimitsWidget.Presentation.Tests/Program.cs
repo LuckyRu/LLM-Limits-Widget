@@ -63,6 +63,15 @@ AssertEqual(
     CountdownTextFormatter.GetNextVisualChangeAt(now, now),
     "V-008 stops countdown after reset time");
 
+var diagnostics = new DiagnosticsViewModel();
+diagnostics.Apply(state, now);
+Assert(
+    diagnostics.Codex.Windows.Contains("62.13%", StringComparison.Ordinal),
+    "V-009 diagnostics projects normalized limit values");
+Assert(
+    diagnostics.Codex.Transports.Contains("Codex app-server", StringComparison.Ordinal),
+    "V-009 diagnostics exposes transport health without raw payload");
+
 if (failures.Count > 0)
 {
     Console.Error.WriteLine(string.Join(Environment.NewLine, failures));
