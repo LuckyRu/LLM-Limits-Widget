@@ -51,12 +51,27 @@ public sealed class ArchitectureV2CompositionRoot : IAsyncDisposable
         _store.StateChanged += Store_StateChanged;
     }
 
-    public static bool IsEnabled(string[] arguments) =>
-        arguments.Any(argument => string.Equals(argument, "--arch-v2", StringComparison.OrdinalIgnoreCase))
-        || string.Equals(
-            Environment.GetEnvironmentVariable("LLM_WIDGET_ARCH_V2"),
-            "1",
-            StringComparison.OrdinalIgnoreCase);
+    public static bool IsEnabled(string[] arguments)
+    {
+        if (arguments.Any(argument => string.Equals(argument, "--legacy", StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        if (string.Equals(
+                Environment.GetEnvironmentVariable("LLM_WIDGET_LEGACY"),
+                "1",
+                StringComparison.OrdinalIgnoreCase)
+            || string.Equals(
+                Environment.GetEnvironmentVariable("LLM_WIDGET_ARCH_V2"),
+                "0",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return true;
+    }
 
     public WidgetViewModel ViewModel { get; }
     public AppState CurrentState => _store.Current;

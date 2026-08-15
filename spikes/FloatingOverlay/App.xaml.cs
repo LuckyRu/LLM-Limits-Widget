@@ -57,8 +57,8 @@ public partial class App : System.Windows.Application
         {
             _architectureV2 = ArchitectureV2CompositionRoot.Create(Dispatcher);
             ((MainWindow)MainWindow).AttachArchitectureV2(_architectureV2);
-            _architectureV2StartTask = StartArchitectureV2Async(_architectureV2);
             WidgetLogger.Info("ArchitectureV2", "composition_feature_enabled");
+            _architectureV2StartTask = StartArchitectureV2Async(_architectureV2);
         }
 
         try
