@@ -22,6 +22,7 @@
 - [Architecture v2: M4 Claude implementation](technical/architecture-v2-m4-implementation-2026-08-15.md) — statusLine/direct `/usage` parsers, typed transport errors и mapping в domain observation envelope.
 - [Architecture v2: M5 observation merge](technical/architecture-v2-m5-implementation-2026-08-15.md) — ordering, source revision, per-window partial merge и Claude tie-breaker.
 - [Architecture v2: M6 push ingress](technical/architecture-v2-m6-implementation-2026-08-15.md) — statusLine observation command, single-writer publication и transport isolation.
+- [Architecture v2: M7 Windows adapters](technical/architecture-v2-m7-implementation-2026-08-15.md) — hidden process runner, Claude direct/statusLine adapters и persistent Codex app-server session.
 
 ## Правила ведения
 

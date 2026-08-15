@@ -21,7 +21,8 @@ public static class ClaudeStatusLineParser
         DateTimeOffset receivedAtUtc,
         long generation,
         long sequence,
-        EffectId effectId)
+        EffectId effectId,
+        string? sourceRevision = null)
     {
         try
         {
@@ -48,6 +49,7 @@ public static class ClaudeStatusLineParser
                 generation,
                 sequence,
                 effectId,
+                sourceRevision,
                 windows);
             if (error is not null)
             {
@@ -62,6 +64,7 @@ public static class ClaudeStatusLineParser
                 generation,
                 sequence,
                 effectId,
+                sourceRevision,
                 windows);
             if (error is not null)
             {
@@ -76,7 +79,8 @@ public static class ClaudeStatusLineParser
                 generation,
                 sequence,
                 effectId,
-                ObservationCompleteness.Partial);
+                ObservationCompleteness.Partial,
+                sourceRevision);
         }
         catch (JsonException)
         {
@@ -98,6 +102,7 @@ public static class ClaudeStatusLineParser
         long generation,
         long sequence,
         EffectId effectId,
+        string? sourceRevision,
         ImmutableDictionary<LimitPeriod, LimitWindowCandidate>.Builder windows)
     {
         if (!rateLimits.TryGetProperty(propertyName, out var window)
@@ -143,13 +148,13 @@ public static class ClaudeStatusLineParser
             return remaining.Error;
         }
 
-        var cursor = new ObservationCursor(generation, sequence, capturedAtUtc, null);
+        var cursor = new ObservationCursor(generation, sequence, capturedAtUtc, sourceRevision);
         windows[period] = new LimitWindowCandidate(
             period,
             remaining.Value!,
             DateTimeOffset.FromUnixTimeSeconds(epoch),
             cursor,
-            new DataProvenance(TransportId.ClaudeStatusLine, capturedAtUtc, null));
+            new DataProvenance(TransportId.ClaudeStatusLine, capturedAtUtc, sourceRevision));
         return null;
     }
 
@@ -161,14 +166,15 @@ public static class ClaudeStatusLineParser
         long generation,
         long sequence,
         EffectId effectId,
-        ObservationCompleteness completeness) =>
+        ObservationCompleteness completeness,
+        string? sourceRevision) =>
         new(
             new ProviderObservationEnvelope(
                 ProviderId.Claude,
                 transport,
                 generation,
                 sequence,
-                null,
+                sourceRevision,
                 capturedAtUtc,
                 receivedAtUtc,
                 completeness,
