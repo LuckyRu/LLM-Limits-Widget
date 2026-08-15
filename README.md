@@ -29,6 +29,22 @@
 - [ADR: гибридный транспорт Claude Pro](docs/decisions/0008-claude-hybrid-usage-transport.md)
 - [Decision log](docs/decisions/0001-project-scope.md)
 
+## Запуск
+
+Для этого репозитория виджет запускается только через [run-widget.ps1](run-widget.ps1). Скрипт останавливает дубликаты, собирает Release и запускает обычный Windows-процесс с трей-иконкой:
+
+```powershell
+.\run-widget.ps1
+```
+
+Для аварийного восстановления ghost-режима и позиции:
+
+```powershell
+.\run-widget.ps1 -NoGhost
+```
+
+`dotnet run` для запуска виджета не используется: он оставляет процесс под оболочкой `dotnet` и в ограниченном окружении может не иметь доступа к пользовательским настройкам, логам и трей-сессии.
+
 ## Рабочее название
 
 Floating LLM Limits Widget. Название не финализировано.
