@@ -73,13 +73,31 @@ finally
     File.Delete(snapshotPath);
 }
 
+var signalPath = Path.Combine(Path.GetTempPath(), $"llm-limits-widget-signal-{Guid.NewGuid():N}.json");
+var sink = new RecordingCommandSink();
+await File.WriteAllTextAsync(signalPath, "{}");
+await using (var pump = new ClaudeStatusLineSignalPump(signalPath, sink, new FixedTimeProvider(now)))
+{
+    pump.Start();
+    await File.WriteAllTextAsync(
+        signalPath,
+        "{\"rate_limits\":{\"five_hour\":{\"used_percentage\":11.5,\"resets_at\":1786793399}}}");
+    var command = await sink.Command.Task.WaitAsync(TimeSpan.FromSeconds(3));
+    Assert(command is ObservationReceivedCommand, "I-005 watcher dispatches domain observation command");
+    AssertEqual(
+        88.5m,
+        ((ObservationReceivedCommand)command).Observation.Windows[LimitPeriod.FiveHours].Remaining.Value,
+        "I-005 watcher preserves parsed observation");
+}
+File.Delete(signalPath);
+
 if (failures.Count > 0)
 {
     Console.Error.WriteLine(string.Join(Environment.NewLine, failures));
     return 1;
 }
 
-Console.WriteLine("Infrastructure M7: all cases passed.");
+Console.WriteLine("Infrastructure M7/M8: all cases passed.");
 return 0;
 
 void Assert(bool condition, string name)
@@ -119,6 +137,21 @@ sealed class FakeCodexSession(string response) : ICodexAppServerSession
 {
     public Task<string> ReadRateLimitsAsync(TimeSpan timeout, CancellationToken cancellationToken) =>
         Task.FromResult(response);
+}
+
+sealed class RecordingCommandSink : IApplicationCommandSink
+{
+    public TaskCompletionSource<DomainCommand> Command { get; } =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public ValueTask DispatchAsync(
+        DomainCommand command,
+        bool priority = false,
+        CancellationToken cancellationToken = default)
+    {
+        Command.TrySetResult(command);
+        return ValueTask.CompletedTask;
+    }
 }
 
 sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
