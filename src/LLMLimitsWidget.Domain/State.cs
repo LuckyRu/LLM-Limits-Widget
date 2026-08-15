@@ -9,6 +9,7 @@ public sealed record ProviderPipelineState(
     AttemptId? ActiveAttempt,
     RefreshReasonSet PendingReasons,
     DateTimeOffset? NextWakeAtUtc,
+    WakeId? ScheduledWake,
     ImmutableArray<DateTimeOffset> RuntimeRestartHistory,
     PipelineLifecycleError? LastLifecycleError)
 {
@@ -18,6 +19,7 @@ public sealed record ProviderPipelineState(
         0,
         null,
         RefreshReasonSet.Empty,
+        null,
         null,
         ImmutableArray<DateTimeOffset>.Empty,
         null);

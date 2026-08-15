@@ -50,27 +50,32 @@ public static class CountdownTextFormatter
         var remaining = resetAtUtc.Value - nowUtc;
         if (remaining <= TimeSpan.Zero)
         {
-            return nowUtc.AddSeconds(1);
+            return null;
         }
 
         if (remaining < TimeSpan.FromMinutes(1))
         {
-            return nowUtc.AddSeconds(1);
+            return nowUtc.Add(DelayUntilFloorDecrements(remaining.TotalSeconds, TimeSpan.FromSeconds(1)));
         }
 
         if (remaining < TimeSpan.FromDays(1))
         {
-            var withinMinute = new TimeSpan(0, 0, 0, remaining.Seconds, remaining.Milliseconds);
-            return nowUtc.Add(TimeSpan.FromMinutes(1) - withinMinute);
+            return nowUtc.Add(DelayUntilFloorDecrements(remaining.TotalMinutes, TimeSpan.FromMinutes(1)));
         }
 
         if (remaining < TimeSpan.FromDays(7))
         {
-            return nowUtc.Add(TimeSpan.FromHours(1) -
-                new TimeSpan(0, remaining.Hours, remaining.Minutes, remaining.Seconds, remaining.Milliseconds));
+            return nowUtc.Add(DelayUntilFloorDecrements(remaining.TotalHours, TimeSpan.FromHours(1)));
         }
 
-        return nowUtc.Add(TimeSpan.FromDays(1) -
-            new TimeSpan(0, remaining.Hours, remaining.Minutes, remaining.Seconds, remaining.Milliseconds));
+        return nowUtc.Add(DelayUntilFloorDecrements(remaining.TotalDays, TimeSpan.FromDays(1)));
+    }
+
+    private static TimeSpan DelayUntilFloorDecrements(double unitsRemaining, TimeSpan unit)
+    {
+        var fraction = unitsRemaining - Math.Floor(unitsRemaining);
+        return fraction <= double.Epsilon
+            ? TimeSpan.FromSeconds(1)
+            : TimeSpan.FromTicks(Math.Max(1, (long)Math.Ceiling(unit.Ticks * fraction)));
     }
 }

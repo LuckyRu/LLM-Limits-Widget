@@ -11,9 +11,11 @@ namespace LLMLimitsWidget.Infrastructure.Windows;
 public sealed class ClaudeStatusLineSignalPump : IAsyncDisposable
 {
     private static readonly TimeSpan Debounce = TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan RecoveryDelay = TimeSpan.FromMinutes(1);
     private readonly string _snapshotPath;
     private readonly ClaudeStatusLineFileReader _reader;
     private readonly IApplicationCommandSink _commands;
+    private readonly TimeProvider _clock;
     private readonly Channel<bool> _signals = Channel.CreateBounded<bool>(new BoundedChannelOptions(1)
     {
         FullMode = BoundedChannelFullMode.DropOldest,
@@ -33,7 +35,8 @@ public sealed class ClaudeStatusLineSignalPump : IAsyncDisposable
         TimeProvider? clock = null)
     {
         _snapshotPath = Path.GetFullPath(snapshotPath);
-        _reader = new ClaudeStatusLineFileReader(_snapshotPath, clock);
+        _clock = clock ?? TimeProvider.System;
+        _reader = new ClaudeStatusLineFileReader(_snapshotPath, _clock);
         _commands = commands;
     }
 
@@ -47,21 +50,7 @@ public sealed class ClaudeStatusLineSignalPump : IAsyncDisposable
             }
 
             _lifetime = CancellationTokenSource.CreateLinkedTokenSource(applicationStopping);
-            var directory = Path.GetDirectoryName(_snapshotPath);
-            if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
-            {
-                _watcher = new FileSystemWatcher(directory, Path.GetFileName(_snapshotPath))
-                {
-                    NotifyFilter = NotifyFilters.LastWrite
-                        | NotifyFilters.Size
-                        | NotifyFilters.FileName,
-                    IncludeSubdirectories = false,
-                    EnableRaisingEvents = true
-                };
-                _watcher.Changed += OnFileSignal;
-                _watcher.Created += OnFileSignal;
-                _watcher.Renamed += OnFileSignal;
-            }
+            EnsureWatcher();
 
             _loop = RunAsync(_lifetime.Token);
             _signals.Writer.TryWrite(true);
@@ -106,6 +95,17 @@ public sealed class ClaudeStatusLineSignalPump : IAsyncDisposable
     private void OnFileSignal(object? sender, FileSystemEventArgs args) =>
         _signals.Writer.TryWrite(true);
 
+    private void OnWatcherError(object? sender, ErrorEventArgs args)
+    {
+        lock (_sync)
+        {
+            _watcher?.Dispose();
+            _watcher = null;
+        }
+
+        _signals.Writer.TryWrite(true);
+    }
+
     private async Task RunAsync(CancellationToken cancellationToken)
     {
         try
@@ -118,6 +118,7 @@ public sealed class ClaudeStatusLineSignalPump : IAsyncDisposable
                 {
                 }
 
+                EnsureWatcher();
                 var result = await _reader.ReadAsync(
                     generation: 0,
                     sequence: Interlocked.Increment(ref _sequence),
@@ -135,10 +136,54 @@ public sealed class ClaudeStatusLineSignalPump : IAsyncDisposable
                         priority: true,
                         cancellationToken).ConfigureAwait(false);
                 }
+                else
+                {
+                    await _commands.DispatchAsync(
+                        new TransportObservationFailedCommand(
+                            ProviderId.Claude,
+                            TransportId.ClaudeStatusLine,
+                            result.Error!,
+                            _clock.GetUtcNow(),
+                            Guid.NewGuid()),
+                        priority: false,
+                        cancellationToken).ConfigureAwait(false);
+                    await Task.Delay(RecoveryDelay, cancellationToken).ConfigureAwait(false);
+                    _signals.Writer.TryWrite(true);
+                }
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+        }
+    }
+
+    private void EnsureWatcher()
+    {
+        lock (_sync)
+        {
+            if (_watcher is not null)
+            {
+                return;
+            }
+
+            var directory = Path.GetDirectoryName(_snapshotPath);
+            if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+            {
+                return;
+            }
+
+            _watcher = new FileSystemWatcher(directory, Path.GetFileName(_snapshotPath))
+            {
+                NotifyFilter = NotifyFilters.LastWrite
+                    | NotifyFilters.Size
+                    | NotifyFilters.FileName,
+                IncludeSubdirectories = false,
+                EnableRaisingEvents = true
+            };
+            _watcher.Changed += OnFileSignal;
+            _watcher.Created += OnFileSignal;
+            _watcher.Renamed += OnFileSignal;
+            _watcher.Error += OnWatcherError;
         }
     }
 }

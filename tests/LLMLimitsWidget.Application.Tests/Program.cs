@@ -66,6 +66,7 @@ await using (var runtime = new ProviderPipelineRuntime(transport, sink))
     await sink.WaitFor<RuntimeStoppedCommand>();
     AssertEqual(RuntimeLifecycle.Stopped, runtime.Lifecycle, "A-032 priority stop cancels tracked attempt");
 }
+Assert(transport.Disposed.Task.IsCompleted, "A-033 runtime disposes an owned disposable transport");
 
 if (failures.Count > 0)
 {
@@ -81,6 +82,14 @@ void AssertEqual<T>(T expected, T actual, string name)
     if (!EqualityComparer<T>.Default.Equals(expected, actual))
     {
         failures.Add($"{name}: expected {expected}, got {actual}");
+    }
+}
+
+void Assert(bool condition, string name)
+{
+    if (!condition)
+    {
+        failures.Add($"{name}: condition was false");
     }
 }
 
@@ -126,11 +135,12 @@ sealed class RecordingCommandSink : IApplicationCommandSink
     }
 }
 
-sealed class BlockingTransport(ProviderId provider) : IProviderAttemptTransport
+sealed class BlockingTransport(ProviderId provider) : IProviderAttemptTransport, IAsyncDisposable
 {
     public ProviderId Provider => provider;
     public TaskCompletionSource<bool> Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public TaskCompletionSource<bool> Cancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource<bool> Disposed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public async Task<AttemptOutcome> AcquireAsync(AttemptContext context, CancellationToken cancellationToken)
     {
@@ -149,5 +159,11 @@ sealed class BlockingTransport(ProviderId provider) : IProviderAttemptTransport
             Cancelled.TrySetResult(true);
             throw;
         }
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        Disposed.TrySetResult(true);
+        return ValueTask.CompletedTask;
     }
 }

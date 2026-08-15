@@ -23,12 +23,7 @@ LLMLimitsWidget.FloatingOverlay.exe --legacy
 
 ## Защита от двойного экземпляра
 
-v2 и legacy используют разные named mutex только для переходного периода:
-
-- v2: `Local\\LLMLimitsWidget.FloatingOverlay.ArchitectureV2`;
-- legacy: `Local\\LLMLimitsWidget.FloatingOverlay`.
-
-После перезапуска приложения пользовательский обычный запуск будет v2. Разные mutex намеренно оставлены до удаления legacy path, чтобы можно было диагностически запустить rollback рядом с уже работающим v2 без ложного duplicate-instance результата.
+Все режимы используют один named mutex `Local\\LLMLimitsWidget.FloatingOverlay`. Rollback не должен создавать второй overlay, второй tray icon и второй набор provider-процессов.
 
 ## Проверки приемки
 
@@ -36,7 +31,7 @@ v2 и legacy используют разные named mutex только для �
 - запуск с `--legacy` не должен создавать v2 composition и должен сохранить legacy coordinator;
 - запуск с `LLM_WIDGET_LEGACY=1` эквивалентен `--legacy`;
 - `--legacy` имеет приоритет над `LLM_WIDGET_ARCH_V2=1`;
-- оба режима сохраняют single-instance protection в рамках своего режима;
+- оба режима используют общую single-instance protection;
 - v2 сохраняет реальные observations Codex/Claude, typed errors, retry и clean shutdown из M13.
 
 ## Ограничение

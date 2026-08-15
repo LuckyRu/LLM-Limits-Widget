@@ -46,6 +46,22 @@ AssertEqual(
     now.AddSeconds(30),
     CountdownTextFormatter.GetNextVisualChangeAt(now.AddHours(3).AddMinutes(39).AddSeconds(30), now),
     "V-006 schedules next minute boundary");
+AssertEqual(
+    now.AddMinutes(30),
+    CountdownTextFormatter.GetNextVisualChangeAt(now.AddDays(2).AddHours(4).AddMinutes(30), now),
+    "V-007 schedules multi-day countdown at next hour boundary");
+AssertEqual(
+    now.AddHours(4),
+    CountdownTextFormatter.GetNextVisualChangeAt(now.AddDays(13).AddHours(4), now),
+    "V-007 schedules weekly countdown at next day boundary");
+AssertEqual(
+    null,
+    new WidgetViewModel().GetNextVisualChangeAt(now),
+    "V-008 does not schedule a timer without data");
+AssertEqual(
+    null,
+    CountdownTextFormatter.GetNextVisualChangeAt(now, now),
+    "V-008 stops countdown after reset time");
 
 if (failures.Count > 0)
 {

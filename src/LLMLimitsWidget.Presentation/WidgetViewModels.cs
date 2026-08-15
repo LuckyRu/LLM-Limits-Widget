@@ -25,15 +25,16 @@ public sealed class WidgetViewModel : INotifyPropertyChanged
     }
 
     public DateTimeOffset? GetNextVisualChangeAt(DateTimeOffset nowUtc) =>
-        new[]
-        {
+        EarliestOrNull(
             Codex.GetNextVisualChangeAt(nowUtc),
-            Claude.GetNextVisualChangeAt(nowUtc)
-        }
-        .Where(value => value.HasValue)
-        .Select(value => value!.Value)
-        .OrderBy(value => value)
-        .FirstOrDefault();
+            Claude.GetNextVisualChangeAt(nowUtc));
+
+    internal static DateTimeOffset? EarliestOrNull(params DateTimeOffset?[] values) =>
+        values.Where(value => value.HasValue)
+            .Select(value => value!.Value)
+            .OrderBy(value => value)
+            .Cast<DateTimeOffset?>()
+            .FirstOrDefault();
 
     internal void Notify(string propertyName) => PropertyChanged?.Invoke(
         this,
@@ -63,17 +64,9 @@ public sealed class ProviderRowViewModel : INotifyPropertyChanged
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public DateTimeOffset? GetNextVisualChangeAt(DateTimeOffset nowUtc) =>
-        new[]
-        {
-            _fiveHours.ResetAtUtc,
-            _sevenDays.ResetAtUtc
-        }
-        .Where(value => value.HasValue)
-        .Select(value => CountdownTextFormatter.GetNextVisualChangeAt(value, nowUtc))
-        .Where(value => value.HasValue)
-        .Select(value => value!.Value)
-        .OrderBy(value => value)
-        .FirstOrDefault();
+        WidgetViewModel.EarliestOrNull(
+            CountdownTextFormatter.GetNextVisualChangeAt(_fiveHours.ResetAtUtc, nowUtc),
+            CountdownTextFormatter.GetNextVisualChangeAt(_sevenDays.ResetAtUtc, nowUtc));
 
     public void Apply(ProviderState state, DateTimeOffset nowUtc)
     {

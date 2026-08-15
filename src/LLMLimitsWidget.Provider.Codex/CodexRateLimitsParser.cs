@@ -37,7 +37,12 @@ public static class CodexRateLimitsParser
                 var code = message?.Contains("login", StringComparison.OrdinalIgnoreCase) == true
                     ? ErrorCode.LoginRequired
                     : ErrorCode.ProcessExited;
-                return Failure(code, ErrorCategory.Transient, RetryDisposition.Backoff, message);
+                return Failure(
+                    code,
+                    code == ErrorCode.LoginRequired ? ErrorCategory.Authentication : ErrorCategory.Transient,
+                    code == ErrorCode.LoginRequired ? RetryDisposition.WaitForUserAction : RetryDisposition.Backoff,
+                    message,
+                    capturedAtUtc);
             }
 
             if (!root.TryGetProperty("result", out var result)
@@ -47,7 +52,8 @@ public static class CodexRateLimitsParser
                     ErrorCode.CapabilityMissing,
                     ErrorCategory.Compatibility,
                     RetryDisposition.WaitForVersionChange,
-                    "Codex rate-limit bucket is unavailable.");
+                    "Codex rate-limit bucket is unavailable.",
+                    capturedAtUtc);
             }
 
             var windows = ImmutableDictionary.CreateBuilder<LimitPeriod, LimitWindowCandidate>();
@@ -83,7 +89,8 @@ public static class CodexRateLimitsParser
                     ErrorCode.NoSupportedWindows,
                     ErrorCategory.InvalidPayload,
                     RetryDisposition.WaitForVersionChange,
-                    "Codex returned no supported seven-day window.");
+                    "Codex returned no supported seven-day window.",
+                    capturedAtUtc);
             }
 
             return new CodexParseResult(
@@ -106,7 +113,8 @@ public static class CodexRateLimitsParser
                 ErrorCode.MalformedPayload,
                 ErrorCategory.InvalidPayload,
                 RetryDisposition.WaitForVersionChange,
-                "Codex response is not valid JSON.");
+                "Codex response is not valid JSON.",
+                capturedAtUtc);
         }
     }
 
@@ -137,7 +145,8 @@ public static class CodexRateLimitsParser
                 ErrorCode.SchemaMismatch,
                 ErrorCategory.InvalidPayload,
                 RetryDisposition.WaitForVersionChange,
-                $"Codex window '{propertyName}' has an unsupported shape.");
+                $"Codex window '{propertyName}' has an unsupported shape.",
+                capturedAtUtc);
         }
 
         var period = durationMinutes switch
@@ -159,7 +168,8 @@ public static class CodexRateLimitsParser
                 ErrorCode.InvalidResetTime,
                 ErrorCategory.InvalidPayload,
                 RetryDisposition.WaitForVersionChange,
-                $"Codex window '{propertyName}' has no valid reset timestamp.");
+                $"Codex window '{propertyName}' has no valid reset timestamp.",
+                capturedAtUtc);
         }
 
         var remaining = RemainingPercent.Create(
@@ -208,21 +218,23 @@ public static class CodexRateLimitsParser
         ErrorCode code,
         ErrorCategory category,
         RetryDisposition retry,
-        string? detail) =>
+        string? detail,
+        DateTimeOffset occurredAtUtc) =>
         new(
             null,
-            Error(code, category, retry, detail));
+            Error(code, category, retry, detail, occurredAtUtc));
 
     private static DomainError Error(
         ErrorCode code,
         ErrorCategory category,
         RetryDisposition retry,
-        string? detail) =>
+        string? detail,
+        DateTimeOffset occurredAtUtc) =>
         new CodexAcquisitionError(
             code,
             category,
             retry,
             code == ErrorCode.LoginRequired ? UserAction.SignIn : UserAction.OpenDiagnostics,
             detail ?? code.ToString(),
-            DateTimeOffset.UnixEpoch);
+            occurredAtUtc);
 }

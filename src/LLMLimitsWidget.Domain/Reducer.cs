@@ -18,6 +18,11 @@ public static class AppReducer
             RuntimeStoppedCommand stopped => RuntimeStopped(state, stopped),
             AttemptCompletedCommand completed => AttemptCompleted(state, completed),
             ObservationReceivedCommand received => ObservationReceived(state, received),
+            TransportObservationFailedCommand failed => TransportObservationFailed(state, failed),
+            RestoreProviderCacheCommand restored => RestoreProviderCache(state, restored),
+            ProviderCacheReadFailedCommand readFailed => CacheReadFailed(state, readFailed),
+            ProviderCacheSavedCommand saved => CacheSaved(state, saved),
+            ProviderCacheSaveFailedCommand saveFailed => CacheSaveFailed(state, saveFailed),
             _ => NoChange(state)
         };
     }
@@ -48,7 +53,14 @@ public static class AppReducer
         {
             providers = UpdateProvider(providers, provider, current => current with
             {
-                Pipeline = current.Pipeline with { Phase = PipelinePhase.Stopping }
+                Pipeline = current.Pipeline with
+                {
+                    Phase = PipelinePhase.Stopping,
+                    ActiveAttempt = null,
+                    NextWakeAtUtc = null,
+                    ScheduledWake = null
+                },
+                NextAttemptAtUtc = null
             });
         }
 
@@ -74,6 +86,18 @@ public static class AppReducer
         }
 
         var pipeline = provider.Pipeline;
+        if (pipeline.Phase is PipelinePhase.Created or PipelinePhase.Starting)
+        {
+            var queued = pipeline with { PendingReasons = pipeline.PendingReasons.Add(command.Reason) };
+            return ReplaceProvider(
+                state,
+                command.Provider,
+                provider with { Pipeline = queued },
+                [],
+                command.CorrelationId,
+                "refresh_queued_until_runtime_ready");
+        }
+
         if (pipeline.Phase == PipelinePhase.Refreshing)
         {
             var nextPipeline = pipeline with
@@ -104,14 +128,18 @@ public static class AppReducer
         var phase = pipeline.Phase == PipelinePhase.ActionRequired
             ? PipelinePhase.HalfOpen
             : PipelinePhase.Refreshing;
-        var attempt = CreateAttempt(command.Provider, provider, command.Reason, command.NowUtc);
+        var reasons = new RefreshReasonSet(command.Reason).Add(pipeline.PendingReasons.Value);
+        var attempt = CreateAttempt(command.Provider, provider, reasons, command.NowUtc);
         var nextProvider = provider with
         {
             Pipeline = pipeline with
             {
                 Phase = phase,
                 ActiveAttempt = attempt.Attempt,
-                NextSequence = attempt.Sequence
+                NextSequence = attempt.Sequence,
+                PendingReasons = RefreshReasonSet.Empty,
+                NextWakeAtUtc = null,
+                ScheduledWake = null
             },
             LastAttemptAtUtc = command.NowUtc
         };
@@ -141,22 +169,36 @@ public static class AppReducer
             return ReplaceProvider(state, command.Provider, waiting, [], command.CorrelationId, "runtime_ready_waiting");
         }
 
-        var attempt = CreateAttempt(command.Provider, provider, RefreshReason.Startup, command.NowUtc);
+        var reasons = provider.Pipeline.PendingReasons.IsEmpty
+            ? new RefreshReasonSet(RefreshReason.Startup)
+            : provider.Pipeline.PendingReasons.Add(RefreshReason.Startup);
+        var attempt = CreateAttempt(command.Provider, provider, reasons, command.NowUtc);
         var next = provider with
         {
             Pipeline = provider.Pipeline with
             {
                 Phase = PipelinePhase.Refreshing,
                 ActiveAttempt = attempt.Attempt,
-                NextSequence = attempt.Sequence
+                NextSequence = attempt.Sequence,
+                PendingReasons = RefreshReasonSet.Empty,
+                NextWakeAtUtc = null,
+                ScheduledWake = null
             },
             LastAttemptAtUtc = command.NowUtc
         };
-        return ReplaceProvider(
+        var providers = state.Providers.SetItem(command.Provider, next);
+        var appState = state with
+        {
+            Lifecycle = providers.Values.All(item => item.Pipeline.Phase is not PipelinePhase.Created and not PipelinePhase.Starting)
+                ? AppLifecycleState.Running
+                : state.Lifecycle,
+            Providers = providers
+        };
+        return Changed(
             state,
-            command.Provider,
-            next,
+            appState,
             [new RunProviderAttemptEffect(attempt.Effect, attempt)],
+            command.Provider,
             command.CorrelationId,
             "runtime_ready_refreshing");
     }
@@ -173,21 +215,24 @@ public static class AppReducer
         var phase = command.RetryAllowed
             ? PipelinePhase.RuntimeRestartBackoff
             : PipelinePhase.Faulted;
+        var dueAtUtc = command.RetryAllowed ? command.NowUtc.AddSeconds(1) : (DateTimeOffset?)null;
+        var wake = command.RetryAllowed ? WakeId.New() : (WakeId?)null;
         var next = provider with
         {
             Pipeline = provider.Pipeline with
             {
                 Phase = phase,
                 LastLifecycleError = command.Error,
-                NextWakeAtUtc = command.RetryAllowed ? command.NowUtc.AddSeconds(1) : null
+                NextWakeAtUtc = dueAtUtc,
+                ScheduledWake = wake
             }
         };
         ImmutableArray<DomainEffect> effects = command.RetryAllowed
             ? [new ScheduleWakeEffect(
                 EffectId.New(),
                 command.Provider,
-                WakeId.New(),
-                command.NowUtc.AddSeconds(1))]
+                wake!.Value,
+                dueAtUtc!.Value)]
             : [];
         return ReplaceProvider(state, command.Provider, next, effects, command.CorrelationId, "runtime_start_failed");
     }
@@ -211,7 +256,10 @@ public static class AppReducer
             {
                 Phase = phase,
                 Generation = provider.Pipeline.Generation + 1,
-                LastLifecycleError = command.Error
+                LastLifecycleError = command.Error,
+                ActiveAttempt = null,
+                NextWakeAtUtc = null,
+                ScheduledWake = null
             }
         };
         return ReplaceProvider(state, command.Provider, next, effects, command.CorrelationId, "runtime_faulted");
@@ -219,7 +267,8 @@ public static class AppReducer
 
     private static DomainTransition WakeElapsed(AppState state, WakeElapsedCommand command)
     {
-        if (!state.Providers.TryGetValue(command.Provider, out var provider))
+        if (!state.Providers.TryGetValue(command.Provider, out var provider)
+            || provider.Pipeline.ScheduledWake != command.Wake)
         {
             return NoChange(state);
         }
@@ -231,7 +280,8 @@ public static class AppReducer
                 Pipeline = provider.Pipeline with
                 {
                     Phase = PipelinePhase.Starting,
-                    NextWakeAtUtc = null
+                    NextWakeAtUtc = null,
+                    ScheduledWake = null
                 }
             };
             return ReplaceProvider(
@@ -243,12 +293,16 @@ public static class AppReducer
                 "runtime_restart_started");
         }
 
-        if (provider.Pipeline.Phase != PipelinePhase.BackingOff)
+        if (provider.Pipeline.Phase is not (PipelinePhase.BackingOff or PipelinePhase.Waiting))
         {
             return NoChange(state);
         }
 
-        var attempt = CreateAttempt(command.Provider, provider, RefreshReason.Recovery, command.NowUtc);
+        var attempt = CreateAttempt(
+            command.Provider,
+            provider,
+            new RefreshReasonSet(RefreshReason.Recovery),
+            command.NowUtc);
         var next = provider with
         {
             Pipeline = provider.Pipeline with
@@ -256,7 +310,8 @@ public static class AppReducer
                 Phase = PipelinePhase.Refreshing,
                 ActiveAttempt = attempt.Attempt,
                 NextSequence = attempt.Sequence,
-                NextWakeAtUtc = null
+                NextWakeAtUtc = null,
+                ScheduledWake = null
             },
             LastAttemptAtUtc = command.NowUtc
         };
@@ -281,7 +336,9 @@ public static class AppReducer
             Pipeline = provider.Pipeline with
             {
                 Phase = PipelinePhase.Stopped,
-                ActiveAttempt = null
+                ActiveAttempt = null,
+                NextWakeAtUtc = null,
+                ScheduledWake = null
             }
         };
         var nextState = state with
@@ -307,63 +364,36 @@ public static class AppReducer
 
         if (command.Outcome is AttemptFailed failed)
         {
-            var transport = provider.Transports.TryGetValue(command.Context.Transport, out var currentTransport)
-                ? currentTransport
-                : TransportState.Initial(command.Context.Transport);
-            var nextTransport = transport with
-            {
-                Health = failed.Error.Retry == RetryDisposition.WaitForUserAction
-                    ? TransportHealth.ActionRequired
-                    : TransportHealth.Degraded,
-                LastError = failed.Error,
-                ConsecutiveFailures = transport.ConsecutiveFailures + 1,
-                LastAttemptAtUtc = command.NowUtc
-            };
-            var nextPhase = failed.Error.Retry == RetryDisposition.WaitForUserAction
-                ? PipelinePhase.ActionRequired
-                : PipelinePhase.BackingOff;
-            var nextProvider = provider with
-            {
-                Pipeline = provider.Pipeline with
-                {
-                    Phase = nextPhase,
-                    ActiveAttempt = null,
-                    NextWakeAtUtc = nextPhase == PipelinePhase.BackingOff
-                        ? command.NowUtc.AddSeconds(5)
-                        : null
-                },
-                Transports = provider.Transports.SetItem(command.Context.Transport, nextTransport)
-            };
-            ImmutableArray<DomainEffect> effects = nextPhase == PipelinePhase.BackingOff
-                ? [new ScheduleWakeEffect(
-                    EffectId.New(),
-                    command.Provider,
-                    WakeId.New(),
-                    command.NowUtc.AddSeconds(5))]
-                : [];
-            return ReplaceProvider(state, command.Provider, nextProvider, effects, command.CorrelationId, "provider_attempt_failed");
+            return ApplyAttemptFailure(
+                state,
+                command.Provider,
+                command.Context.Transport,
+                failed.Error,
+                command.NowUtc,
+                command.CorrelationId,
+                "provider_attempt_failed");
         }
 
         var success = (AttemptSucceeded)command.Outcome;
         var merged = ObservationMergePolicy.TryMerge(provider, success.Observation, command.NowUtc);
         if (!merged.IsSuccess)
         {
-            var rejected = provider with
-            {
-                Pipeline = provider.Pipeline with { Phase = PipelinePhase.BackingOff, ActiveAttempt = null },
-                Transports = provider.Transports.SetItem(
-                    command.Context.Transport,
-                    provider.Transports[command.Context.Transport] with
-                    {
-                        Health = TransportHealth.Degraded,
-                        LastError = merged.Error,
-                        ConsecutiveFailures = provider.Transports[command.Context.Transport].ConsecutiveFailures + 1
-                    })
-            };
-            return ReplaceProvider(state, command.Provider, rejected, [], command.CorrelationId, "observation_rejected");
+            return ApplyAttemptFailure(
+                state,
+                command.Provider,
+                command.Context.Transport,
+                merged.Error!,
+                command.NowUtc,
+                command.CorrelationId,
+                "observation_rejected");
         }
 
         var accepted = merged.Value!;
+        if (!HasWindowChanges(provider.LastKnownGood, accepted))
+        {
+            return CompleteUnchangedAttempt(state, provider, command);
+        }
+
         var healthyTransport = provider.Transports[command.Context.Transport] with
         {
             Health = TransportHealth.Healthy,
@@ -371,22 +401,53 @@ public static class AppReducer
             ConsecutiveFailures = 0,
             LastSuccessAtUtc = command.NowUtc
         };
+        var pendingReasons = provider.Pipeline.PendingReasons;
+        var nextAttempt = pendingReasons.IsEmpty
+            ? null
+            : CreateAttempt(command.Provider, provider, pendingReasons, command.NowUtc);
+        var nextWake = nextAttempt is null ? WakeId.New() : (WakeId?)null;
+        var nextWakeAtUtc = nextAttempt is null
+            ? command.NowUtc.Add(ProviderRefreshSchedule.HealthyInterval(command.Provider))
+            : (DateTimeOffset?)null;
         var updated = provider with
         {
             LastKnownGood = accepted,
             Freshness = DataFreshness.Fresh,
             AggregateHealth = ProviderHealth.Healthy,
-            Pipeline = provider.Pipeline with { Phase = PipelinePhase.Waiting, ActiveAttempt = null },
+            Pipeline = provider.Pipeline with
+            {
+                Phase = nextAttempt is null ? PipelinePhase.Waiting : PipelinePhase.Refreshing,
+                ActiveAttempt = nextAttempt?.Attempt,
+                NextSequence = nextAttempt?.Sequence ?? provider.Pipeline.NextSequence,
+                PendingReasons = RefreshReasonSet.Empty,
+                NextWakeAtUtc = nextWakeAtUtc,
+                ScheduledWake = nextWake
+            },
             Transports = provider.Transports.SetItem(command.Context.Transport, healthyTransport),
             LastSuccessAtUtc = command.NowUtc,
             AcceptedGeneration = command.Context.Generation,
-            AcceptedSequence = command.Context.Sequence
+            AcceptedSequence = command.Context.Sequence,
+            NextAttemptAtUtc = nextWakeAtUtc
         };
+        var effects = ImmutableArray.CreateBuilder<DomainEffect>();
+        effects.Add(new SaveProviderCacheEffect(EffectId.New(), command.Provider, accepted));
+        if (nextAttempt is not null)
+        {
+            effects.Add(new RunProviderAttemptEffect(nextAttempt.Effect, nextAttempt));
+        }
+        else
+        {
+            effects.Add(new ScheduleWakeEffect(
+                EffectId.New(),
+                command.Provider,
+                nextWake!.Value,
+                nextWakeAtUtc!.Value));
+        }
         return ReplaceProvider(
             state,
             command.Provider,
             updated,
-            [new SaveProviderCacheEffect(EffectId.New(), command.Provider, accepted)],
+            effects,
             command.CorrelationId,
             "provider_observation_accepted");
     }
@@ -432,6 +493,11 @@ public static class AppReducer
             ConsecutiveFailures = 0,
             LastSuccessAtUtc = command.NowUtc
         };
+        if (!HasWindowChanges(provider.LastKnownGood, merged.Value!))
+        {
+            return NoChange(state);
+        }
+
         var updated = provider with
         {
             LastKnownGood = merged.Value,
@@ -449,10 +515,237 @@ public static class AppReducer
             "provider_push_observation_accepted");
     }
 
+    private static DomainTransition ApplyAttemptFailure(
+        AppState state,
+        ProviderId providerId,
+        TransportId transportId,
+        DomainError error,
+        DateTimeOffset nowUtc,
+        Guid correlationId,
+        string eventName)
+    {
+        var provider = state.Providers[providerId];
+        var currentTransport = provider.Transports.TryGetValue(transportId, out var knownTransport)
+            ? knownTransport
+            : TransportState.Initial(transportId);
+        var failures = currentTransport.ConsecutiveFailures + 1;
+        var nextTransport = currentTransport with
+        {
+            Health = error.Retry is RetryDisposition.WaitForUserAction or RetryDisposition.WaitForVersionChange or RetryDisposition.Never
+                ? TransportHealth.ActionRequired
+                : TransportHealth.Degraded,
+            LastError = error,
+            ConsecutiveFailures = failures,
+            LastAttemptAtUtc = nowUtc
+        };
+
+        var phase = error.Retry switch
+        {
+            RetryDisposition.Immediate or RetryDisposition.Backoff => PipelinePhase.BackingOff,
+            RetryDisposition.WaitForSignal => PipelinePhase.Waiting,
+            RetryDisposition.Never => PipelinePhase.Faulted,
+            _ => PipelinePhase.ActionRequired
+        };
+        var retryDelay = ProviderRefreshSchedule.RetryDelay(error.Retry, failures);
+        var dueAtUtc = retryDelay == Timeout.InfiniteTimeSpan ? (DateTimeOffset?)null : nowUtc.Add(retryDelay);
+        var wake = dueAtUtc is null ? (WakeId?)null : WakeId.New();
+        var nextProvider = provider with
+        {
+            Freshness = provider.LastKnownGood is null ? DataFreshness.Missing : DataFreshness.Stale,
+            AggregateHealth = phase == PipelinePhase.ActionRequired
+                ? ProviderHealth.ActionRequired
+                : phase == PipelinePhase.Faulted
+                    ? ProviderHealth.Faulted
+                    : ProviderHealth.Degraded,
+            Pipeline = provider.Pipeline with
+            {
+                Phase = phase,
+                ActiveAttempt = null,
+                NextWakeAtUtc = dueAtUtc,
+                ScheduledWake = wake
+            },
+            Transports = provider.Transports.SetItem(transportId, nextTransport),
+            NextAttemptAtUtc = dueAtUtc
+        };
+        ImmutableArray<DomainEffect> effects = dueAtUtc is { } due && wake is { } scheduledWake
+            ? [new ScheduleWakeEffect(EffectId.New(), providerId, scheduledWake, due)]
+            : [];
+        return ReplaceProvider(state, providerId, nextProvider, effects, correlationId, eventName);
+    }
+
+    private static DomainTransition CompleteUnchangedAttempt(
+        AppState state,
+        ProviderState provider,
+        AttemptCompletedCommand command)
+    {
+        var pendingReasons = provider.Pipeline.PendingReasons;
+        var nextAttempt = pendingReasons.IsEmpty
+            ? null
+            : CreateAttempt(command.Provider, provider, pendingReasons, command.NowUtc);
+        var dueAtUtc = nextAttempt is null
+            ? command.NowUtc.Add(ProviderRefreshSchedule.HealthyInterval(command.Provider))
+            : (DateTimeOffset?)null;
+        var wake = nextAttempt is null ? WakeId.New() : (WakeId?)null;
+        var transport = provider.Transports[command.Context.Transport] with
+        {
+            Health = TransportHealth.Healthy,
+            LastError = null,
+            ConsecutiveFailures = 0,
+            LastSuccessAtUtc = command.NowUtc
+        };
+        var updated = provider with
+        {
+            Pipeline = provider.Pipeline with
+            {
+                Phase = nextAttempt is null ? PipelinePhase.Waiting : PipelinePhase.Refreshing,
+                ActiveAttempt = nextAttempt?.Attempt,
+                NextSequence = nextAttempt?.Sequence ?? provider.Pipeline.NextSequence,
+                PendingReasons = RefreshReasonSet.Empty,
+                NextWakeAtUtc = dueAtUtc,
+                ScheduledWake = wake
+            },
+            Transports = provider.Transports.SetItem(command.Context.Transport, transport),
+            NextAttemptAtUtc = dueAtUtc
+        };
+        var effects = nextAttempt is null
+            ? ImmutableArray.Create<DomainEffect>(
+                new ScheduleWakeEffect(EffectId.New(), command.Provider, wake!.Value, dueAtUtc!.Value))
+            : ImmutableArray.Create<DomainEffect>(new RunProviderAttemptEffect(nextAttempt.Effect, nextAttempt));
+        return ReplaceProvider(
+            state,
+            command.Provider,
+            updated,
+            effects,
+            command.CorrelationId,
+            "provider_observation_unchanged");
+    }
+
+    private static DomainTransition TransportObservationFailed(
+        AppState state,
+        TransportObservationFailedCommand command)
+    {
+        if (!state.Providers.TryGetValue(command.Provider, out var provider)
+            || !provider.Transports.TryGetValue(command.Transport, out var transport))
+        {
+            return NoChange(state);
+        }
+
+        var updatedTransport = transport with
+        {
+            Health = command.Error.Retry is RetryDisposition.WaitForUserAction or RetryDisposition.WaitForVersionChange or RetryDisposition.Never
+                ? TransportHealth.ActionRequired
+                : TransportHealth.Degraded,
+            LastError = command.Error,
+            ConsecutiveFailures = transport.ConsecutiveFailures + 1,
+            LastAttemptAtUtc = command.NowUtc
+        };
+        var transports = provider.Transports.SetItem(command.Transport, updatedTransport);
+        var hasHealthyTransport = transports.Values.Any(value => value.Health == TransportHealth.Healthy);
+        var updated = provider with
+        {
+            Transports = transports,
+            AggregateHealth = hasHealthyTransport
+                ? ProviderHealth.Healthy
+                : updatedTransport.Health == TransportHealth.ActionRequired
+                    ? ProviderHealth.ActionRequired
+                    : ProviderHealth.Degraded
+        };
+        return ReplaceProvider(
+            state,
+            command.Provider,
+            updated,
+            [],
+            command.CorrelationId,
+            "transport_observation_failed");
+    }
+
+    private static DomainTransition RestoreProviderCache(
+        AppState state,
+        RestoreProviderCacheCommand command)
+    {
+        if (!state.Providers.TryGetValue(command.Provider, out var provider)
+            || command.Limits.Provider != command.Provider)
+        {
+            return NoChange(state);
+        }
+
+        var freshness = command.NowUtc - command.Limits.ObservedAtUtc <= ProviderRefreshSchedule.HealthyInterval(command.Provider)
+            ? DataFreshness.Aging
+            : DataFreshness.Stale;
+        var updated = provider with
+        {
+            LastKnownGood = command.Limits,
+            Freshness = freshness,
+            Persistence = provider.Persistence with
+            {
+                Health = PersistenceHealth.Healthy,
+                LastError = null,
+                LastReadAtUtc = command.NowUtc
+            }
+        };
+        return ReplaceProvider(state, command.Provider, updated, [], command.CorrelationId, "provider_cache_restored");
+    }
+
+    private static DomainTransition CacheReadFailed(
+        AppState state,
+        ProviderCacheReadFailedCommand command) =>
+        UpdatePersistence(state, command.Provider, command.Error, command.NowUtc, read: true, command.CorrelationId, "provider_cache_read_failed");
+
+    private static DomainTransition CacheSaved(
+        AppState state,
+        ProviderCacheSavedCommand command) =>
+        UpdatePersistence(state, command.Provider, null, command.NowUtc, read: false, command.CorrelationId, "provider_cache_saved");
+
+    private static DomainTransition CacheSaveFailed(
+        AppState state,
+        ProviderCacheSaveFailedCommand command) =>
+        UpdatePersistence(state, command.Provider, command.Error, command.NowUtc, read: false, command.CorrelationId, "provider_cache_save_failed");
+
+    private static DomainTransition UpdatePersistence(
+        AppState state,
+        ProviderId providerId,
+        PersistenceError? error,
+        DateTimeOffset nowUtc,
+        bool read,
+        Guid correlationId,
+        string eventName)
+    {
+        if (!state.Providers.TryGetValue(providerId, out var provider))
+        {
+            return NoChange(state);
+        }
+
+        var persistence = provider.Persistence with
+        {
+            Health = error is null ? PersistenceHealth.Healthy : PersistenceHealth.Degraded,
+            LastError = error,
+            LastReadAtUtc = read ? nowUtc : provider.Persistence.LastReadAtUtc,
+            LastWriteAtUtc = read ? provider.Persistence.LastWriteAtUtc : nowUtc
+        };
+        return ReplaceProvider(
+            state,
+            providerId,
+            provider with { Persistence = persistence },
+            [],
+            correlationId,
+            eventName);
+    }
+
+    private static bool HasWindowChanges(ProviderLimits? existing, ProviderLimits candidate)
+    {
+        if (existing is null || existing.Windows.Count != candidate.Windows.Count)
+        {
+            return true;
+        }
+
+        return candidate.Windows.Any(pair => !existing.Windows.TryGetValue(pair.Key, out var current)
+            || current != pair.Value);
+    }
+
     private static AttemptContext CreateAttempt(
         ProviderId provider,
         ProviderState current,
-        RefreshReason reason,
+        RefreshReasonSet reasons,
         DateTimeOffset nowUtc)
     {
         var transport = provider == ProviderId.Codex
@@ -466,7 +759,7 @@ public static class AppReducer
             EffectId.New(),
             current.Pipeline.Generation,
             sequence,
-            new RefreshReasonSet(reason),
+            reasons,
             nowUtc.AddSeconds(30));
     }
 

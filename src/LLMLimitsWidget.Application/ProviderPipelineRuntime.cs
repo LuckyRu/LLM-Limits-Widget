@@ -20,7 +20,9 @@ public sealed class ProviderPipelineRuntime : IProviderRuntime
     private Task? _loop;
     private Task? _attemptCompletion;
     private CancellationTokenSource? _attemptLifetime;
+    private AttemptId? _activeAttempt;
     private Task? _wakeTask;
+    private CancellationTokenSource? _wakeLifetime;
     private RuntimeLifecycle _lifecycle = RuntimeLifecycle.Created;
 
     public ProviderPipelineRuntime(
@@ -122,6 +124,8 @@ public sealed class ProviderPipelineRuntime : IProviderRuntime
         {
             lifetime.Cancel();
         }
+        _attemptLifetime?.Cancel();
+        _wakeLifetime?.Cancel();
 
         Task? loop;
         lock (_sync)
@@ -140,7 +144,28 @@ public sealed class ProviderPipelineRuntime : IProviderRuntime
             }
         }
 
+        var attempt = _attemptCompletion;
+        if (attempt is not null)
+        {
+            try
+            {
+                await attempt.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+            }
+        }
+
+        _priority.Writer.TryComplete();
+        _ordinary.Writer.TryComplete();
+        _attemptLifetime?.Dispose();
+        _wakeLifetime?.Dispose();
+        if (_transport is IAsyncDisposable disposable)
+        {
+            await disposable.DisposeAsync().ConfigureAwait(false);
+        }
         lifetime?.Dispose();
+        SetLifecycle(RuntimeLifecycle.Stopped);
     }
 
     private async Task RunAsync(CancellationToken cancellationToken)
@@ -204,6 +229,7 @@ public sealed class ProviderPipelineRuntime : IProviderRuntime
 
             _attemptLifetime?.Dispose();
             _attemptLifetime = CancellationTokenSource.CreateLinkedTokenSource(runtimeCancellation);
+            _activeAttempt = context.Attempt;
             _attemptCompletion = CompleteAttemptAsync(context, _attemptLifetime.Token);
         }
     }
@@ -217,6 +243,7 @@ public sealed class ProviderPipelineRuntime : IProviderRuntime
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            ReleaseAttempt(context.Attempt);
             return;
         }
         catch (Exception)
@@ -228,20 +255,32 @@ public sealed class ProviderPipelineRuntime : IProviderRuntime
                 _clock.GetUtcNow()));
         }
 
-        await _commands.DispatchAsync(
-            new AttemptCompletedCommand(
-                Provider,
-                context,
-                outcome,
-                _clock.GetUtcNow(),
-                Guid.NewGuid()),
-            priority: true,
-            cancellationToken: CancellationToken.None).ConfigureAwait(false);
+        ReleaseAttempt(context.Attempt);
+        try
+        {
+            await _commands.DispatchAsync(
+                new AttemptCompletedCommand(
+                    Provider,
+                    context,
+                    outcome,
+                    _clock.GetUtcNow(),
+                    Guid.NewGuid()),
+                priority: true,
+                cancellationToken: CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException)
+        {
+            // The Store may close during process shutdown. The result is no
+            // longer actionable and must not fault an unobserved attempt task.
+        }
     }
 
     private void ScheduleWake(ScheduleWakeEffect effect, CancellationToken runtimeCancellation)
     {
-        _wakeTask = WaitAndDispatchWakeAsync(effect, runtimeCancellation);
+        _wakeLifetime?.Cancel();
+        _wakeLifetime?.Dispose();
+        _wakeLifetime = CancellationTokenSource.CreateLinkedTokenSource(runtimeCancellation);
+        _wakeTask = WaitAndDispatchWakeAsync(effect, _wakeLifetime.Token);
     }
 
     private async Task WaitAndDispatchWakeAsync(ScheduleWakeEffect effect, CancellationToken cancellationToken)
@@ -267,6 +306,17 @@ public sealed class ProviderPipelineRuntime : IProviderRuntime
     {
         SetLifecycle(RuntimeLifecycle.Stopping);
         _attemptLifetime?.Cancel();
+        _wakeLifetime?.Cancel();
+        if (_attemptCompletion is not null && !force)
+        {
+            try
+            {
+                await _attemptCompletion.WaitAsync(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+            }
+        }
         if (_wakeTask is not null && !force)
         {
             try
@@ -284,6 +334,22 @@ public sealed class ProviderPipelineRuntime : IProviderRuntime
             priority: true,
             cancellationToken).ConfigureAwait(false);
         _lifetime?.Cancel();
+    }
+
+    private void ReleaseAttempt(AttemptId attempt)
+    {
+        lock (_sync)
+        {
+            if (_activeAttempt != attempt)
+            {
+                return;
+            }
+
+            _activeAttempt = null;
+            _attemptLifetime?.Dispose();
+            _attemptLifetime = null;
+            _attemptCompletion = null;
+        }
     }
 
     private void SetLifecycle(RuntimeLifecycle lifecycle)

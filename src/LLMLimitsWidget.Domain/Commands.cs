@@ -86,6 +86,41 @@ public sealed record ObservationReceivedCommand(
     Guid CorrelationId)
     : DomainCommand(NowUtc, CorrelationId);
 
+public sealed record TransportObservationFailedCommand(
+    ProviderId Provider,
+    TransportId Transport,
+    DomainError Error,
+    DateTimeOffset NowUtc,
+    Guid CorrelationId)
+    : DomainCommand(NowUtc, CorrelationId);
+
+public sealed record RestoreProviderCacheCommand(
+    ProviderId Provider,
+    ProviderLimits Limits,
+    DateTimeOffset NowUtc,
+    Guid CorrelationId)
+    : DomainCommand(NowUtc, CorrelationId);
+
+public sealed record ProviderCacheReadFailedCommand(
+    ProviderId Provider,
+    PersistenceError Error,
+    DateTimeOffset NowUtc,
+    Guid CorrelationId)
+    : DomainCommand(NowUtc, CorrelationId);
+
+public sealed record ProviderCacheSavedCommand(
+    ProviderId Provider,
+    DateTimeOffset NowUtc,
+    Guid CorrelationId)
+    : DomainCommand(NowUtc, CorrelationId);
+
+public sealed record ProviderCacheSaveFailedCommand(
+    ProviderId Provider,
+    PersistenceError Error,
+    DateTimeOffset NowUtc,
+    Guid CorrelationId)
+    : DomainCommand(NowUtc, CorrelationId);
+
 public abstract record DomainEffect(EffectId Id, ProviderId Provider);
 
 public sealed record StartRuntimeEffect(EffectId Id, ProviderId Provider)

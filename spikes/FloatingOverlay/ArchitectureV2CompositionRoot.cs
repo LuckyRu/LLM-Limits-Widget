@@ -22,6 +22,7 @@ public sealed class ArchitectureV2CompositionRoot : IAsyncDisposable
     private readonly ProviderPipelineRuntime _codexRuntime;
     private readonly ProviderPipelineRuntime _claudeRuntime;
     private readonly ClaudeStatusLineSignalPump _statusLinePump;
+    private readonly IProviderCache _cache;
     private bool _started;
 
     private ArchitectureV2CompositionRoot(Dispatcher dispatcher)
@@ -42,7 +43,8 @@ public sealed class ArchitectureV2CompositionRoot : IAsyncDisposable
             new ClaudeDirectCliTransport(ProviderExecutableLocator.ResolveClaude(), runner, _clock),
             _store,
             _clock);
-        _effects = new ProviderEffectExecutor([_codexRuntime, _claudeRuntime]);
+        _cache = new JsonProviderCache();
+        _effects = new ProviderEffectExecutor([_codexRuntime, _claudeRuntime], _store, _cache);
         deferredEffects.Set(_effects);
         _statusLinePump = new ClaudeStatusLineSignalPump(
             ResolveStatusLinePath(),
@@ -88,6 +90,7 @@ public sealed class ArchitectureV2CompositionRoot : IAsyncDisposable
 
         _started = true;
         _store.Start(_lifetime.Token);
+        await RestoreCacheAsync().ConfigureAwait(false);
         await _codexRuntime.StartAsync(_lifetime.Token).ConfigureAwait(false);
         await _claudeRuntime.StartAsync(_lifetime.Token).ConfigureAwait(false);
         _statusLinePump.Start(_lifetime.Token);
@@ -119,11 +122,24 @@ public sealed class ArchitectureV2CompositionRoot : IAsyncDisposable
         }
 
         _store.StateChanged -= Store_StateChanged;
-        await _statusLinePump.DisposeAsync().ConfigureAwait(false);
-        await _effects.DisposeAsync().ConfigureAwait(false);
-        await _store.DisposeAsync().ConfigureAwait(false);
-        _lifetime.Dispose();
-        _started = false;
+        try
+        {
+            await _statusLinePump.DisposeAsync().ConfigureAwait(false);
+            await _store.DispatchAsync(
+                new StopApplicationCommand(_clock.GetUtcNow(), Guid.NewGuid()),
+                priority: true).ConfigureAwait(false);
+            await _store.WaitForStateAsync(
+                state => state.Lifecycle == AppLifecycleState.Stopped,
+                TimeSpan.FromSeconds(5),
+                CancellationToken.None).ConfigureAwait(false);
+        }
+        finally
+        {
+            await _effects.DisposeAsync().ConfigureAwait(false);
+            await _store.DisposeAsync().ConfigureAwait(false);
+            _lifetime.Dispose();
+            _started = false;
+        }
     }
 
     private void Store_StateChanged(AppState state, DomainTransition transition)
@@ -165,6 +181,40 @@ public sealed class ArchitectureV2CompositionRoot : IAsyncDisposable
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "LLMLimitsWidget",
             "claude-statusline-snapshot.json");
+
+    private async Task RestoreCacheAsync()
+    {
+        foreach (var provider in Enum.GetValues<ProviderId>())
+        {
+            var nowUtc = _clock.GetUtcNow();
+            try
+            {
+                var limits = await _cache.LoadAsync(provider, _lifetime.Token).ConfigureAwait(false);
+                if (limits is not null)
+                {
+                    await _store.DispatchAsync(
+                        new RestoreProviderCacheCommand(provider, limits, nowUtc, Guid.NewGuid()),
+                        priority: true,
+                        cancellationToken: _lifetime.Token).ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                await _store.DispatchAsync(
+                    new ProviderCacheReadFailedCommand(
+                        provider,
+                        new PersistenceError(provider, ErrorCode.CacheReadFailed, "cache_read_failed", nowUtc),
+                        nowUtc,
+                        Guid.NewGuid()),
+                    priority: true,
+                    cancellationToken: _lifetime.Token).ConfigureAwait(false);
+            }
+        }
+    }
 
     private sealed class DeferredEffectExecutor : IApplicationEffectExecutor
     {

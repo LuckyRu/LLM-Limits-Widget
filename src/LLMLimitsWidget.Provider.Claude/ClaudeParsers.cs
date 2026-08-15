@@ -302,7 +302,7 @@ public static partial class ClaudeUsageParser
                 code,
                 category,
                 retry,
-                UserAction.OpenDiagnostics,
+                code == ErrorCode.LoginRequired ? UserAction.SignIn : UserAction.OpenDiagnostics,
                 detail,
                 occurredAtUtc));
 

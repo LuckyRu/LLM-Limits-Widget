@@ -42,7 +42,7 @@ public partial class App : System.Windows.Application
 
         var architectureV2Enabled = ArchitectureV2CompositionRoot.IsEnabled(e.Args);
 
-        if (!TryAcquireSingleInstance(architectureV2Enabled))
+        if (!TryAcquireSingleInstance())
         {
             WidgetLogger.Info("App", "duplicate_instance_exit");
             Shutdown();
@@ -234,15 +234,13 @@ public partial class App : System.Windows.Application
         }
     }
 
-    private bool TryAcquireSingleInstance(bool architectureV2Enabled)
+    private bool TryAcquireSingleInstance()
     {
         try
         {
             _singleInstanceMutex = new Mutex(
                 initiallyOwned: false,
-                name: architectureV2Enabled
-                    ? "Local\\LLMLimitsWidget.FloatingOverlay.ArchitectureV2"
-                    : "Local\\LLMLimitsWidget.FloatingOverlay",
+                name: "Local\\LLMLimitsWidget.FloatingOverlay",
                 createdNew: out _);
             try
             {

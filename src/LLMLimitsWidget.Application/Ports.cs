@@ -26,3 +26,9 @@ public interface IApplicationEffectExecutor
 {
     ValueTask ExecuteAsync(DomainEffect effect, CancellationToken cancellationToken = default);
 }
+
+public interface IProviderCache
+{
+    Task<ProviderLimits?> LoadAsync(ProviderId provider, CancellationToken cancellationToken = default);
+    Task SaveAsync(ProviderId provider, ProviderLimits limits, CancellationToken cancellationToken = default);
+}

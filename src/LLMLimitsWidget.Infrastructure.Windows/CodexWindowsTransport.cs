@@ -11,7 +11,7 @@ public interface ICodexAppServerSession
     Task<string> ReadRateLimitsAsync(TimeSpan timeout, CancellationToken cancellationToken);
 }
 
-public sealed class CodexAppServerTransport : IProviderAttemptTransport
+public sealed class CodexAppServerTransport : IProviderAttemptTransport, IAsyncDisposable
 {
     private readonly ICodexAppServerSession _session;
     private readonly TimeProvider _clock;
@@ -79,6 +79,14 @@ public sealed class CodexAppServerTransport : IProviderAttemptTransport
                 : UserAction.OpenDiagnostics,
             exception.Message,
             occurredAtUtc);
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_session is IAsyncDisposable disposable)
+        {
+            await disposable.DisposeAsync().ConfigureAwait(false);
+        }
+    }
 }
 
 /// <summary>

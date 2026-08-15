@@ -53,6 +53,41 @@ public sealed class AppStore : IApplicationCommandSink, IAsyncDisposable
 
     public event Action<AppState, DomainTransition>? StateChanged;
 
+    public async Task WaitForStateAsync(
+        Func<AppState, bool> predicate,
+        TimeSpan timeout,
+        CancellationToken cancellationToken = default)
+    {
+        if (predicate(Current))
+        {
+            return;
+        }
+
+        var reached = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        void OnStateChanged(AppState state, DomainTransition _)
+        {
+            if (predicate(state))
+            {
+                reached.TrySetResult(true);
+            }
+        }
+
+        StateChanged += OnStateChanged;
+        try
+        {
+            if (predicate(Current))
+            {
+                return;
+            }
+
+            await reached.Task.WaitAsync(timeout, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            StateChanged -= OnStateChanged;
+        }
+    }
+
     public void Start(CancellationToken applicationStopping = default)
     {
         lock (_sync)
@@ -148,7 +183,27 @@ public sealed class AppStore : IApplicationCommandSink, IAsyncDisposable
 
                 foreach (var effect in transition.Effects)
                 {
-                    await _effects.ExecuteAsync(effect, cancellationToken).ConfigureAwait(false);
+                    try
+                    {
+                        await _effects.ExecuteAsync(effect, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch
+                    {
+                        _priority.Writer.TryWrite(new RuntimeFaultedCommand(
+                            effect.Provider,
+                            RestartAllowed: true,
+                            new PipelineLifecycleError(
+                                effect.Provider,
+                                ErrorCode.UnexpectedPipelineTermination,
+                                "effect_execution_failed",
+                                DateTimeOffset.UtcNow),
+                            DateTimeOffset.UtcNow,
+                            Guid.NewGuid()));
+                    }
                 }
             }
         }
@@ -191,20 +246,62 @@ public sealed class AppStore : IApplicationCommandSink, IAsyncDisposable
 public sealed class ProviderEffectExecutor : IApplicationEffectExecutor, IAsyncDisposable
 {
     private readonly ImmutableDictionary<ProviderId, IProviderRuntime> _runtimes;
+    private readonly IApplicationCommandSink _commands;
+    private readonly IProviderCache _cache;
 
-    public ProviderEffectExecutor(IEnumerable<IProviderRuntime> runtimes)
+    public ProviderEffectExecutor(
+        IEnumerable<IProviderRuntime> runtimes,
+        IApplicationCommandSink commands,
+        IProviderCache cache)
     {
         _runtimes = runtimes.ToImmutableDictionary(runtime => runtime.Provider);
+        _commands = commands;
+        _cache = cache;
     }
 
-    public ValueTask ExecuteAsync(DomainEffect effect, CancellationToken cancellationToken = default) =>
-        _runtimes[effect.Provider].ExecuteAsync(effect, cancellationToken);
+    public async ValueTask ExecuteAsync(DomainEffect effect, CancellationToken cancellationToken = default)
+    {
+        if (effect is SaveProviderCacheEffect save)
+        {
+            await SaveCacheAsync(save, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        await _runtimes[effect.Provider].ExecuteAsync(effect, cancellationToken).ConfigureAwait(false);
+    }
 
     public async ValueTask DisposeAsync()
     {
         foreach (var runtime in _runtimes.Values)
         {
             await runtime.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    private async Task SaveCacheAsync(SaveProviderCacheEffect effect, CancellationToken cancellationToken)
+    {
+        var nowUtc = DateTimeOffset.UtcNow;
+        try
+        {
+            await _cache.SaveAsync(effect.Provider, effect.Limits, cancellationToken).ConfigureAwait(false);
+            await _commands.DispatchAsync(
+                new ProviderCacheSavedCommand(effect.Provider, nowUtc, Guid.NewGuid()),
+                priority: false,
+                cancellationToken: CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception)
+        {
+            await _commands.DispatchAsync(
+                new ProviderCacheSaveFailedCommand(
+                    effect.Provider,
+                    new PersistenceError(effect.Provider, ErrorCode.CacheWriteFailed, "cache_write_failed", nowUtc),
+                    nowUtc,
+                    Guid.NewGuid()),
+                priority: false,
+                cancellationToken: CancellationToken.None).ConfigureAwait(false);
         }
     }
 }

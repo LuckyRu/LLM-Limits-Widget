@@ -27,6 +27,39 @@ finally
     Environment.SetEnvironmentVariable("CLAUDE_CODE_PATH", previousClaudePath);
 }
 
+var cacheDirectory = Path.Combine(Path.GetTempPath(), $"llm-limits-cache-{Guid.NewGuid():N}");
+try
+{
+    var cachedRemaining = RemainingPercent.Create(42.5m, ProviderId.Codex, TransportId.CodexAppServer, now).Value!;
+    var cacheLimits = new ProviderLimits(
+        ProviderId.Codex,
+        ObservationId.New(),
+        now,
+        ImmutableDictionary<LimitPeriod, LimitWindow>.Empty.Add(
+            LimitPeriod.SevenDays,
+            new LimitWindow(
+                LimitPeriod.SevenDays,
+                cachedRemaining,
+                now.AddDays(2),
+                new ObservationCursor(1, 2, now, "cache-1"),
+                new DataProvenance(TransportId.CodexAppServer, now, "cache-1"))));
+    var cache = new JsonProviderCache(cacheDirectory);
+    await cache.SaveAsync(ProviderId.Codex, cacheLimits);
+    var restored = await cache.LoadAsync(ProviderId.Codex);
+    Assert(restored is not null, "I-000 cache restores saved limits");
+    AssertEqual(
+        42.5m,
+        restored!.Windows[LimitPeriod.SevenDays].Remaining.Value,
+        "I-000 cache preserves remaining percent");
+}
+finally
+{
+    if (Directory.Exists(cacheDirectory))
+    {
+        Directory.Delete(cacheDirectory, recursive: true);
+    }
+}
+
 var runner = new ScriptedRunner(new HiddenProcessResult(
     0,
     "{\"is_error\":false,\"result\":\"Current session: 27.25% used · resets Aug 15, 7:59am (UTC)\\nCurrent week (all models): 47.5% used · resets Aug 17, 4:59pm (UTC)\"}",
