@@ -391,7 +391,7 @@ public static class AppReducer
         var accepted = merged.Value!;
         if (!HasWindowChanges(provider.LastKnownGood, accepted))
         {
-            return CompleteUnchangedAttempt(state, provider, command);
+            return CompleteUnchangedAttempt(state, provider, command, accepted);
         }
 
         var healthyTransport = provider.Transports[command.Context.Transport] with
@@ -493,11 +493,6 @@ public static class AppReducer
             ConsecutiveFailures = 0,
             LastSuccessAtUtc = command.NowUtc
         };
-        if (!HasWindowChanges(provider.LastKnownGood, merged.Value!))
-        {
-            return NoChange(state);
-        }
-
         var shouldDeferClaudeDirect = command.Provider == ProviderId.Claude
             && command.Observation.Transport == TransportId.ClaudeStatusLine
             && provider.Pipeline.Phase is PipelinePhase.Waiting or PipelinePhase.BackingOff;
@@ -600,7 +595,8 @@ public static class AppReducer
     private static DomainTransition CompleteUnchangedAttempt(
         AppState state,
         ProviderState provider,
-        AttemptCompletedCommand command)
+        AttemptCompletedCommand command,
+        ProviderLimits accepted)
     {
         var pendingReasons = provider.Pipeline.PendingReasons;
         var nextAttempt = pendingReasons.IsEmpty
@@ -619,6 +615,9 @@ public static class AppReducer
         };
         var updated = provider with
         {
+            LastKnownGood = accepted,
+            Freshness = DataFreshness.Fresh,
+            AggregateHealth = ProviderHealth.Healthy,
             Pipeline = provider.Pipeline with
             {
                 Phase = nextAttempt is null ? PipelinePhase.Waiting : PipelinePhase.Refreshing,
@@ -629,6 +628,9 @@ public static class AppReducer
                 ScheduledWake = wake
             },
             Transports = provider.Transports.SetItem(command.Context.Transport, transport),
+            LastSuccessAtUtc = command.NowUtc,
+            AcceptedGeneration = command.Context.Generation,
+            AcceptedSequence = command.Context.Sequence,
             NextAttemptAtUtc = dueAtUtc
         };
         var effects = nextAttempt is null

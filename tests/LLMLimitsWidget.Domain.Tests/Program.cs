@@ -119,6 +119,28 @@ var periodicRetry = AppReducer.Reduce(
     new WakeElapsedCommand(ProviderId.Codex, healthyWake.Wake, healthyWake.DueAtUtc, Guid.NewGuid()));
 AssertEqual(PipelinePhase.Refreshing, periodicRetry.State.Providers[ProviderId.Codex].Pipeline.Phase, "D-005 starts scheduled refresh");
 
+var staleBeforeUnchangedAttempt = periodicRetry.State with
+{
+    Providers = periodicRetry.State.Providers.SetItem(
+        ProviderId.Codex,
+        periodicRetry.State.Providers[ProviderId.Codex] with
+        {
+            Freshness = DataFreshness.Stale,
+            AggregateHealth = ProviderHealth.Degraded
+        })
+};
+var unchangedAttempt = AppReducer.Reduce(
+    staleBeforeUnchangedAttempt,
+    new AttemptCompletedCommand(
+        ProviderId.Codex,
+        periodicRetry.Effects.OfType<RunProviderAttemptEffect>().Single().Context,
+        new AttemptSucceeded(observation),
+        now.AddMinutes(3),
+        Guid.NewGuid()));
+AssertEqual(DataFreshness.Fresh, unchangedAttempt.State.Providers[ProviderId.Codex].Freshness, "D-005 refreshes freshness after unchanged successful result");
+AssertEqual(ProviderHealth.Healthy, unchangedAttempt.State.Providers[ProviderId.Codex].AggregateHealth, "D-005 restores provider health after unchanged successful result");
+AssertEqual(now.AddMinutes(3), unchangedAttempt.State.Providers[ProviderId.Codex].LastSuccessAtUtc, "D-005 records unchanged successful result time");
+
 var queuedCompletion = AppReducer.Reduce(
     queued.State,
     new AttemptCompletedCommand(
@@ -214,6 +236,35 @@ AssertEqual(
     70m,
     pushed.State.Providers[ProviderId.Claude].LastKnownGood!.Windows[LimitPeriod.FiveHours].Remaining.Value,
     "T-003 statusLine push enters the single-writer store");
+var staleStatusLine = pushed.State with
+{
+    Providers = pushed.State.Providers.SetItem(
+        ProviderId.Claude,
+        pushed.State.Providers[ProviderId.Claude] with
+        {
+            Freshness = DataFreshness.Stale,
+            AggregateHealth = ProviderHealth.Degraded,
+            Transports = pushed.State.Providers[ProviderId.Claude].Transports.SetItem(
+                TransportId.ClaudeStatusLine,
+                pushed.State.Providers[ProviderId.Claude].Transports[TransportId.ClaudeStatusLine] with
+                {
+                    Health = TransportHealth.Degraded,
+                    LastError = new ClaudeStatusLineError(
+                        ErrorCode.StatusLineNotConfigured,
+                        ErrorCategory.Configuration,
+                        RetryDisposition.WaitForSignal,
+                        UserAction.RepairConfiguration,
+                        "statusline_missing",
+                        now)
+                })
+        })
+};
+var unchangedStatusLine = AppReducer.Reduce(
+    staleStatusLine,
+    new ObservationReceivedCommand(ProviderId.Claude, statusObservation, now.AddMinutes(1), Guid.NewGuid()));
+AssertEqual(DataFreshness.Fresh, unchangedStatusLine.State.Providers[ProviderId.Claude].Freshness, "T-003 refreshes freshness after unchanged statusLine push");
+AssertEqual(TransportHealth.Healthy, unchangedStatusLine.State.Providers[ProviderId.Claude].Transports[TransportId.ClaudeStatusLine].Health, "T-003 clears recovered statusLine error");
+AssertEqual(ProviderHealth.Healthy, unchangedStatusLine.State.Providers[ProviderId.Claude].AggregateHealth, "T-003 restores provider health after recovered statusLine push");
 var waitingClaude = AppState.Empty with
 {
     Lifecycle = AppLifecycleState.Running,

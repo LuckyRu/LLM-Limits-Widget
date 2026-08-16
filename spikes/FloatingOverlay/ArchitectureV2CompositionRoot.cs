@@ -160,11 +160,15 @@ public sealed class ArchitectureV2CompositionRoot : IAsyncDisposable
     {
         var codex = state.Providers[ProviderId.Codex];
         var claude = state.Providers[ProviderId.Claude];
+        var stateEvent = transition.Events.OfType<StateTransitionEvent>().FirstOrDefault();
+        var statusLine = claude.Transports[TransportId.ClaudeStatusLine];
+        var direct = claude.Transports[TransportId.ClaudeDirectCli];
         WidgetLogger.Debug(
             "ArchitectureV2",
             "state_changed",
             ("revision", state.Revision),
-            ("transition", transition.Events.OfType<StateTransitionEvent>().FirstOrDefault()?.Name ?? "unknown"),
+            ("provider", stateEvent?.Provider),
+            ("transition", stateEvent?.Name ?? "unknown"),
             ("codexFreshness", codex.Freshness),
             ("codexHealth", codex.AggregateHealth),
             ("codexWindows", codex.LastKnownGood?.Windows.Count ?? 0),
@@ -172,7 +176,10 @@ public sealed class ArchitectureV2CompositionRoot : IAsyncDisposable
             ("claudeHealth", claude.AggregateHealth),
             ("claudeWindows", claude.LastKnownGood?.Windows.Count ?? 0),
             ("codexTransportError", codex.Transports.Values.Select(transport => transport.LastError?.Code.ToString()).FirstOrDefault(value => value is not null) ?? string.Empty),
-            ("claudeTransportError", claude.Transports.Values.Select(transport => transport.LastError?.Code.ToString()).FirstOrDefault(value => value is not null) ?? string.Empty));
+            ("claudeStatusLineHealth", statusLine.Health),
+            ("claudeStatusLineError", statusLine.LastError?.Code.ToString() ?? string.Empty),
+            ("claudeDirectHealth", direct.Health),
+            ("claudeDirectError", direct.LastError?.Code.ToString() ?? string.Empty));
 
         void Apply()
         {
